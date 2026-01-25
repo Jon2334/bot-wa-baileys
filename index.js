@@ -2868,5 +2868,5 @@ process.on('unhandledRejection', (err) => {
     console.error('💥 Unhandled Rejection:', err.message);
 });
 
-// Start bot
+
 startBot();
