@@ -2869,13 +2869,4 @@ process.on('unhandledRejection', (err) => {
 });
 
 // Start bot
-startBot();/ /  
- d e p l o y  
- t r i g g e r  
- / /  
- d e p l o y  
- t r i g g e r  
- / /  
- d e p l o y  
- t r i g g e r  
- 
+startBot();
