@@ -1,2 +1,6 @@
 node_modules/
 .env
+
+# n8n-as-code AI helpers
+n8nac-skills
+n8nac-skills.cmd
