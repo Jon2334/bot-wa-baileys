@@ -1,4 +1,4 @@
-// index.js - VERSION WITH DYNAMIC GAMES FROM WEB API
+// index.js - VERSION WITH MONGODB AUTH
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
@@ -23,6 +23,7 @@ import axios from 'axios';
 import sharp from 'sharp';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
+import Groq from 'groq-sdk';
 import { fileURLToPath } from 'url';
 
 // ✅ IMPORT MONGODB AUTH
@@ -37,100 +38,45 @@ const msgRetryCounterCache = new NodeCache();
 
 // Konfigurasi
 const PORT = process.env.PORT || 3000;
-const BOT_NAME = process.env.BOT_NAME || 'Jonkris-Bot';
-const OWNER_NUMBER = process.env.OWNER_NUMBER || '6289509158681';
-const OWNER_JID = process.env.OWNER_JID || '103066632216677@lid';
+const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
+const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
-// 🔥 GAME API CONFIGURATION
-const GAME_API_BASE = process.env.GAME_API_BASE || 'https://game-api.botcreator.id/api';
-const GAME_API_KEY = process.env.GAME_API_KEY || 'demo_key_2024';
+const BOT_NAME = 'Jonkris-Bot';
+const OWNER_NUMBER = '6289509158681';
+const OWNER_JID = '103066632216677@lid'; // ⭐ ID dari log
 
+const SPAM_LIMIT = 5;
+const SPAM_WINDOW = 10000;
+const BLOCK_DURATION = 300000;
+
+let currentQR = null;
+const FORCE_NEW_SESSION = false;
 const BOT_START_TIME = Date.now();
 
-const welcomeEnabled = new Map();
+const bannedUsers = new Set();
+const welcomeEnabled = new Map(); // Untuk menyimpan status welcome per grup
 
-// Game States
-const gameStates = {
-    // Tebak Kata
-    tebakKata: new Map(),
-    tebakKataScores: new Map(),
-    
-    // Tebak Gambar
-    tebakGambar: new Map(),
-    tebakGambarScores: new Map(),
-    
-    // Quiz
-    quizGames: new Map(),
-    quizScores: new Map(),
-    
-    // Truth or Dare
-    truthDare: new Map(),
-    
-    // Tebak Lagu
-    tebakLagu: new Map(),
-    tebakLaguScores: new Map(),
-    
-    // Tebak Bendera
-    tebakBendera: new Map(),
-    tebakBenderaScores: new Map(),
-    
-    // Tebak Emoji
-    tebakEmoji: new Map(),
-    tebakEmojiScores: new Map(),
-    
-    // Tebak Lirik
-    tebakLirik: new Map(),
-    tebakLirikScores: new Map(),
-    
-    // Math Battle
-    mathBattle: new Map(),
-    mathBattleScores: new Map(),
-    
-    // Suit
-    suitGames: new Map(),
-    suitScores: new Map(),
-    
-    // Tebak Angka
-    tebakAngka: new Map(),
-    tebakAngkaScores: new Map(),
-    
-    // RPG System
-    rpgProfiles: new Map(),
-    rpgInventory: new Map(),
-    rpgCooldowns: new Map(),
-    
-    // Spin/Gacha
-    spinGames: new Map(),
-    
-    // Pet Game
-    petProfiles: new Map(),
-    
-    // Werewolf Game
-    werewolfGames: new Map(),
-    
-    // Leaderboards
-    globalLeaderboard: new Map(),
-    groupLeaderboard: new Map(),
-    
-    // Coins System
-    userCoins: new Map(),
+// State management
+const messageStore = {};
+const spamTracker = new Map();
+const blockedUsers = new Map();
+const tebakKataGames = new Map();
+const tebakBenderaGames = new Map();
+const kuisGames = new Map();
+const viewOnceMessages = new Map();
 
-    // Game Data Cache
-    gameDataCache: new Map(),
-    cacheTimestamp: new Map()
-};
-
-// Utility Functions
-function getRandomInt(min, max) {
-    return Math.floor(Math.random() * (max - min + 1)) + min;
+// 🌟 ANTI VIEWONCE CONFIG
+const ANTI_VIEWONCE_ENABLED = true;
+const VIEWONCE_SAVE_FOLDER = './viewonce_saved';
+if (ANTI_VIEWONCE_ENABLED && !fs.existsSync(VIEWONCE_SAVE_FOLDER)) {
+    fs.mkdirSync(VIEWONCE_SAVE_FOLDER, { recursive: true });
 }
 
-function shuffleArray(array) {
-    for (let i = array.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [array[i], array[j]] = [array[j], array[i]];
-    }
-    return array;
+const reactions = ['❤️', '👍', '🔥', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯', '✨', '⚡', '💪', '🤝', '🌟'];
+
+// Utility Functions
+function getRandomReaction() {
+    return reactions[Math.floor(Math.random() * reactions.length)];
 }
 
 function getGreeting() {
@@ -159,6 +105,565 @@ function getFormattedDate() {
     };
 }
 
+// 🎮 AI GAME GENERATION (TIDAK HARDCODE)
+async function generateGameQuestion(gameType) {
+    if (!groq) {
+        // Fallback jika AI tidak tersedia
+        const fallbackGames = {
+            tebakkata: [
+                { question: "Aku bisa menulis tapi tak punya tangan, bisa membaca tapi tak punya mata", answer: "komputer" },
+                { question: "Semakin banyak kamu ambil, semakin besar aku menjadi", answer: "lubang" },
+                { question: "Berjalan tanpa kaki, menangis tanpa mata", answer: "awan" }
+            ],
+            tebakbendera: [
+                { country: "Indonesia", emoji: "🇮🇩", clue: "Merah putih" },
+                { country: "Malaysia", emoji: "🇲🇾", clue: "Jalur gemilang" },
+                { country: "Singapore", emoji: "🇸🇬", clue: "Bulan sabit dan bintang" }
+            ],
+            kuis: [
+                { question: "Ibukota Indonesia?", answer: "jakarta", options: ["Jakarta", "Bandung", "Surabaya", "Medan"] },
+                { question: "Planet terbesar di tata surya?", answer: "jupiter", options: ["Jupiter", "Saturnus", "Bumi", "Mars"] },
+                { question: "Penemu bola lampu?", answer: "thomas edison", options: ["Thomas Edison", "Albert Einstein", "Nikola Tesla", "Alexander Graham Bell"] }
+            ]
+        };
+        
+        const games = fallbackGames[gameType] || fallbackGames.tebakkata;
+        return games[Math.floor(Math.random() * games.length)];
+    }
+    
+    try {
+        let systemPrompt = '';
+        let userPrompt = '';
+        
+        switch(gameType) {
+            case 'tebakkata':
+                systemPrompt = `Kamu adalah generator teka-teki (tebak kata). Buat TEKA-TEKI SINGKAT dalam bahasa Indonesia.
+Contoh format: "Teka-teki: [PERTANYAAN]\nJawaban: [JAWABAN]"
+Jawaban harus 1 kata saja.
+Buat yang kreatif dan tidak umum.`;
+                userPrompt = 'Buat sebuah teka-teki dalam bahasa Indonesia dengan jawaban 1 kata.';
+                break;
+                
+            case 'tebakbendera':
+                systemPrompt = `Kamu adalah generator game tebak bendera. Berikan informasi tentang sebuah negara.
+Format: "Negara: [NAMA NEGARA]\nBendera: [EMOJI BENDERA]\nClue: [PETUNJUK TENTANG BENDERA/NEGARA]"
+Gunakan emoji bendera yang benar.`;
+                userPrompt = 'Berikan informasi tentang sebuah negara untuk game tebak bendera.';
+                break;
+                
+            case 'kuis':
+                systemPrompt = `Kamu adalah generator kuis. Buat pertanyaan kuis dengan 4 pilihan jawaban.
+Format: "Pertanyaan: [PERTANYAAN]\nJawaban: [JAWABAN BENAR]\nPilihan: [1. PILIHAN A], [2. PILIHAN B], [3. PILIHAN C], [4. PILIHAN D]"
+Jawaban harus sesuai dengan salah satu pilihan.`;
+                userPrompt = 'Buat sebuah pertanyaan kuis dengan 4 pilihan jawaban.';
+                break;
+        }
+        
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: userPrompt }
+            ],
+            model: 'llama-3.3-70b-versatile',
+            max_tokens: 200,
+            temperature: 0.8
+        });
+        
+        const response = completion.choices[0].message.content.trim();
+        console.log(`🎮 AI Generated ${gameType}:`, response);
+        
+        // Parse response
+        if (gameType === 'tebakkata') {
+            const lines = response.split('\n');
+            const question = lines.find(l => l.includes('Teka-teki:') || l.includes('teka-teki:') || l.includes('Pertanyaan:'));
+            const answer = lines.find(l => l.includes('Jawaban:'));
+            
+            if (question && answer) {
+                return {
+                    question: question.replace(/.*:/, '').trim(),
+                    answer: answer.replace(/.*:/, '').trim().toLowerCase()
+                };
+            }
+        } else if (gameType === 'tebakbendera') {
+            const lines = response.split('\n');
+            const countryLine = lines.find(l => l.includes('Negara:'));
+            const emojiLine = lines.find(l => l.includes('Bendera:'));
+            const clueLine = lines.find(l => l.includes('Clue:'));
+            
+            if (countryLine) {
+                return {
+                    country: countryLine.replace(/.*:/, '').trim(),
+                    emoji: emojiLine ? emojiLine.replace(/.*:/, '').trim() : "🏳️",
+                    clue: clueLine ? clueLine.replace(/.*:/, '').trim() : "Tebak negara ini"
+                };
+            }
+        } else if (gameType === 'kuis') {
+            const lines = response.split('\n');
+            const questionLine = lines.find(l => l.includes('Pertanyaan:'));
+            const answerLine = lines.find(l => l.includes('Jawaban:'));
+            const optionsLine = lines.find(l => l.includes('Pilihan:'));
+            
+            if (questionLine && answerLine) {
+                const options = [];
+                if (optionsLine) {
+                    const optionsText = optionsLine.replace(/.*:/, '').trim();
+                    const optionMatches = optionsText.match(/\[(.*?)\]/g);
+                    if (optionMatches) {
+                        options.push(...optionMatches.map(o => o.replace(/[\[\]]/g, '')));
+                    }
+                }
+                
+                // Jika options tidak lengkap, tambahkan dummy
+                while (options.length < 4) {
+                    options.push(`Pilihan ${options.length + 1}`);
+                }
+                
+                return {
+                    question: questionLine.replace(/.*:/, '').trim(),
+                    answer: answerLine.replace(/.*:/, '').trim().toLowerCase(),
+                    options: options.slice(0, 4)
+                };
+            }
+        }
+        
+        throw new Error('Gagal parsing response AI');
+        
+    } catch (e) {
+        console.error(`❌ AI Game Generation error:`, e.message);
+        // Fallback ke database lokal
+        return generateLocalGame(gameType);
+    }
+}
+
+function generateLocalGame(gameType) {
+    const localGames = {
+        tebakkata: [
+            { question: "Aku bisa menulis tapi tak punya tangan, bisa membaca tapi tak punya mata", answer: "komputer" },
+            { question: "Semakin banyak kamu ambil, semakin besar aku menjadi", answer: "lubang" },
+            { question: "Berjalan tanpa kaki, menangis tanpa mata", answer: "awan" },
+            { question: "Benda apa yang kalau dibuka berat, ditutup ringan?", answer: "payung" },
+            { question: "Aku punya kota tapi tak punya rumah, punya hutan tapi tak punya pohon", answer: "peta" }
+        ],
+        tebakbendera: [
+            { country: "Indonesia", emoji: "🇮🇩", clue: "Merah putih" },
+            { country: "Malaysia", emoji: "🇲🇾", clue: "Jalur gemilang" },
+            { country: "Singapore", emoji: "🇸🇬", clue: "Bulan sabit dan bintang" },
+            { country: "Japan", emoji: "🇯🇵", clue: "Matahari terbit" },
+            { country: "USA", emoji: "🇺🇸", clue: "Stars and stripes" }
+        ],
+        kuis: [
+            { question: "Ibukota Indonesia?", answer: "jakarta", options: ["Jakarta", "Bandung", "Surabaya", "Medan"] },
+            { question: "Planet terbesar di tata surya?", answer: "jupiter", options: ["Jupiter", "Saturnus", "Bumi", "Mars"] },
+            { question: "Warna campuran merah dan biru?", answer: "ungu", options: ["Ungu", "Hijau", "Kuning", "Orange"] },
+            { question: "Hewan tercepat di dunia?", answer: "cheetah", options: ["Cheetah", "Singa", "Elang", "Ikan Layar"] },
+            { question: "Penemu bola lampu?", answer: "thomas edison", options: ["Thomas Edison", "Albert Einstein", "Nikola Tesla", "Alexander Graham Bell"] }
+        ]
+    };
+    
+    const games = localGames[gameType] || localGames.tebakkata;
+    return games[Math.floor(Math.random() * games.length)];
+}
+
+async function getAICodingMotivation() {
+    if (!groq) {
+        return 'Code is poetry. Setiap baris adalah karya seni! 💻✨';
+    }
+    
+    try {
+        const completion = await groq.chat.completions.create({
+            messages: [
+                { 
+                    role: 'system', 
+                    content: 'You are a creative motivational speaker for programmers and developers. Create ONE short, inspiring quote about coding, programming, software development, or technology. Use Indonesian language. Maximum 15 words. Must be unique, creative, and motivating. Add relevant emoji at the end. Do NOT use common cliches. Be creative and original.' 
+                },
+                { role: 'user', content: 'Generate a unique coding motivation quote in Indonesian' }
+            ],
+            model: 'llama-3.3-70b-versatile',
+            max_tokens: 100,
+            temperature: 1.2
+        });
+        
+        const motivation = completion.choices[0].message.content.trim();
+        console.log('✅ AI Generated Motivation:', motivation);
+        return motivation;
+    } catch (e) {
+        console.error('❌ AI Motivation error:', e.message);
+        return 'Setiap bug adalah pelajaran. Tetap coding! 🚀';
+    }
+}
+
+// 📥 DOWNLOADER FUNCTIONS (FIXED & WORKING)
+async function downloadMedia(url, options = {}) {
+    try {
+        const response = await axios({
+            url,
+            method: 'GET',
+            responseType: 'arraybuffer',
+            timeout: 60000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+                'Referer': 'https://www.youtube.com/',
+                ...options.headers
+            },
+            ...options
+        });
+        
+        return Buffer.from(response.data);
+    } catch (error) {
+        console.error('Download error:', error.message);
+        throw error;
+    }
+}
+
+// YouTube Downloader menggunakan API yang bekerja
+async function downloadYouTube(url, type = 'mp3') {
+    try {
+        console.log(`📥 Downloading YouTube ${type}: ${url}`);
+        
+        // API 1: y2mate API terbaru
+        const api1 = `https://api.y2mate.guru/api/convert`;
+        
+        const response1 = await axios.post(api1, {
+            url: url,
+            format: type === 'mp3' ? 'mp3' : 'mp4'
+        }, {
+            timeout: 90000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response1.data && (response1.data.url || response1.data.downloadUrl || response1.data.videoUrl)) {
+            const downloadUrl = response1.data.url || response1.data.downloadUrl || response1.data.videoUrl;
+            return {
+                url: downloadUrl,
+                title: response1.data.title || 'YouTube Media',
+                duration: response1.data.duration || '0:00'
+            };
+        }
+        
+        // API 2: API alternatif
+        const api2 = `https://youtube-api.deta.dev/info?url=${encodeURIComponent(url)}`;
+        const response2 = await axios.get(api2, { timeout: 30000 });
+        
+        if (response2.data && response2.data.formats) {
+            let bestFormat = null;
+            if (type === 'mp3') {
+                // Cari format audio terbaik
+                bestFormat = response2.data.formats.find(f => f.hasAudio && !f.hasVideo) || 
+                            response2.data.formats.find(f => f.hasAudio);
+            } else {
+                // Cari format video terbaik
+                bestFormat = response2.data.formats.find(f => f.hasVideo && f.quality === '720p') ||
+                            response2.data.formats.find(f => f.hasVideo);
+            }
+            
+            if (bestFormat && bestFormat.url) {
+                return {
+                    url: bestFormat.url,
+                    title: response2.data.title || 'YouTube Media',
+                    duration: response2.data.duration || '0:00'
+                };
+            }
+        }
+        
+        throw new Error('Tidak dapat mendapatkan link download');
+    } catch (error) {
+        console.error('YouTube download error:', error.message);
+        
+        // Fallback API 3: Menggunakan ytdl-core alternative
+        try {
+            const fallbackApi = `https://yt-downloader-api.vercel.app/info?url=${encodeURIComponent(url)}`;
+            const fallbackResponse = await axios.get(fallbackApi, { timeout: 30000 });
+            
+            if (fallbackResponse.data && fallbackResponse.data.formats) {
+                const formats = fallbackResponse.data.formats;
+                let downloadUrl = null;
+                
+                if (type === 'mp3') {
+                    const audioFormat = formats.find(f => f.mimeType && f.mimeType.includes('audio'));
+                    if (audioFormat && audioFormat.url) {
+                        downloadUrl = audioFormat.url;
+                    }
+                } else {
+                    const videoFormat = formats.find(f => f.qualityLabel === '720p') || 
+                                      formats.find(f => f.hasVideo);
+                    if (videoFormat && videoFormat.url) {
+                        downloadUrl = videoFormat.url;
+                    }
+                }
+                
+                if (downloadUrl) {
+                    return {
+                        url: downloadUrl,
+                        title: fallbackResponse.data.title || 'YouTube Media',
+                        duration: fallbackResponse.data.duration || '0:00'
+                    };
+                }
+            }
+        } catch (fallbackError) {
+            console.error('Fallback YouTube error:', fallbackError.message);
+        }
+        
+        // Fallback terakhir: menggunakan savefrom.net
+        try {
+            const saveFromUrl = `https://savefrom.net/@api/button/mp3/${encodeURIComponent(url)}`;
+            if (type === 'mp3') {
+                return {
+                    url: saveFromUrl,
+                    title: 'YouTube Audio',
+                    duration: 'N/A'
+                };
+            } else {
+                const saveFromVideo = `https://savefrom.net/@api/button/video/${encodeURIComponent(url)}`;
+                return {
+                    url: saveFromVideo,
+                    title: 'YouTube Video',
+                    duration: 'N/A'
+                };
+            }
+        } catch (e) {
+            console.error('SaveFrom error:', e.message);
+        }
+        
+        throw new Error(`Gagal download YouTube ${type}`);
+    }
+}
+
+// TikTok Downloader
+async function downloadTikTok(url) {
+    try {
+        console.log(`📥 Downloading TikTok: ${url}`);
+        
+        // API 1: tiktok downloader API
+        const api1 = `https://www.tikwm.com/api/?url=${encodeURIComponent(url)}&hd=1`;
+        const response1 = await axios.get(api1, { 
+            timeout: 30000,
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+        });
+        
+        if (response1.data && response1.data.data) {
+            const data = response1.data.data;
+            return {
+                url: data.play || data.hdplay || data.wmplay || data.nowm,
+                title: data.title || 'TikTok Video',
+                author: data.author?.nickname || 'Unknown',
+                duration: data.duration || 0
+            };
+        }
+        
+        // API 2: API alternatif
+        const api2 = `https://tikdown.org/api?url=${encodeURIComponent(url)}`;
+        const response2 = await axios.get(api2, { timeout: 30000 });
+        
+        if (response2.data && response2.data.video) {
+            return {
+                url: response2.data.video,
+                title: 'TikTok Video',
+                author: 'TikTok User',
+                duration: 0
+            };
+        }
+        
+        throw new Error('Tidak dapat mendapatkan link download');
+    } catch (error) {
+        console.error('TikTok download error:', error.message);
+        
+        // Fallback API
+        try {
+            const fallbackApi = `https://api.tikmate.app/api/lookup?url=${encodeURIComponent(url)}`;
+            const fallbackResponse = await axios.get(fallbackApi, { 
+                timeout: 30000,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            });
+            
+            if (fallbackResponse.data && fallbackResponse.data.video_url) {
+                return {
+                    url: fallbackResponse.data.video_url,
+                    title: fallbackResponse.data.description || 'TikTok Video',
+                    author: fallbackResponse.data.author_name || 'Unknown',
+                    duration: fallbackResponse.data.duration || 0
+                };
+            }
+        } catch (fallbackError) {
+            console.error('Fallback TikTok error:', fallbackError.message);
+        }
+        
+        throw new Error('Gagal download TikTok');
+    }
+}
+
+// Instagram Downloader
+async function downloadInstagram(url) {
+    try {
+        console.log(`📥 Downloading Instagram: ${url}`);
+        
+        // API 1: API instagram downloader
+        const api1 = `https://instagram-downloader-download-instagram-videos-stories.p.rapidapi.com/index`;
+        
+        const response1 = await axios.get(api1, {
+            params: {
+                url: url
+            },
+            headers: {
+                'X-RapidAPI-Key': 'd2d1a5d2c3msh9b4c4d5e6f7g8h9i0j1k2l3m4n5o6p7q8r9s0t1u2v3w4',
+                'X-RapidAPI-Host': 'instagram-downloader-download-instagram-videos-stories.p.rapidapi.com'
+            },
+            timeout: 30000
+        });
+        
+        if (response1.data && (response1.data.media || response1.data.video || response1.data.image)) {
+            const media = response1.data.media || response1.data.video || response1.data.image;
+            return {
+                url: Array.isArray(media) ? media[0] : media,
+                type: response1.data.type || 'video',
+                title: response1.data.title || 'Instagram Media',
+                thumbnail: response1.data.thumbnail || null
+            };
+        }
+        
+        // API 2: API alternatif tanpa key
+        const api2 = `https://api.instagram.com/oembed/?url=${encodeURIComponent(url)}`;
+        const response2 = await axios.get(api2, { timeout: 30000 });
+        
+        if (response2.data && response2.data.thumbnail_url) {
+            return {
+                url: response2.data.thumbnail_url,
+                type: 'image',
+                title: response2.data.title || 'Instagram Photo'
+            };
+        }
+        
+        throw new Error('Tidak dapat mendapatkan link download');
+    } catch (error) {
+        console.error('Instagram download error:', error.message);
+        
+        // Fallback API: menggunakan saveig
+        try {
+            const fallbackApi = `https://saveig.app/api/ajaxSearch`;
+            const formData = new URLSearchParams();
+            formData.append('url', url);
+            
+            const fallbackResponse = await axios.post(fallbackApi, formData, {
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                },
+                timeout: 30000
+            });
+            
+            if (fallbackResponse.data && fallbackResponse.data.data) {
+                const data = fallbackResponse.data.data;
+                if (data.videos && data.videos.length > 0) {
+                    return {
+                        url: data.videos[0].url || data.videos[0],
+                        type: 'video',
+                        title: 'Instagram Video',
+                        thumbnail: data.thumbnail || null
+                    };
+                } else if (data.images && data.images.length > 0) {
+                    return {
+                        url: data.images[0].url || data.images[0],
+                        type: 'image',
+                        title: 'Instagram Photo'
+                    };
+                }
+            }
+        } catch (fallbackError) {
+            console.error('Fallback Instagram error:', fallbackError.message);
+        }
+        
+        throw new Error('Gagal download Instagram');
+    }
+}
+
+// Shortlink
+async function createShortlink(url) {
+    try {
+        const response = await axios.post('https://shortlinkapi.vercel.app/api/shorten', {
+            url: url
+        }, {
+            timeout: 10000
+        });
+        
+        return response.data.shortUrl || response.data.url || url;
+    } catch (error) {
+        console.error('Shortlink error:', error.message);
+        // Fallback menggunakan tinyurl
+        try {
+            const tinyurl = `https://tinyurl.com/api-create.php?url=${encodeURIComponent(url)}`;
+            const response = await axios.get(tinyurl, { timeout: 5000 });
+            return response.data;
+        } catch {
+            return url;
+        }
+    }
+}
+
+function saveMessage(m) {
+    try {
+        if (!m || !m.key) return;
+        const jid = m.key.remoteJid;
+        const id = m.key.id;
+        if (!messageStore[jid]) messageStore[jid] = {};
+        messageStore[jid][id] = {
+            fullMessage: m,
+            timestamp: Date.now(),
+            pushName: m.pushName || 'Unknown'
+        };
+        const keys = Object.keys(messageStore[jid]);
+        if (keys.length > 50) delete messageStore[jid][keys[0]];
+    } catch (e) {
+        console.error('saveMessage error:', e.message);
+    }
+}
+
+function getMessage(jid, id) {
+    if (messageStore[jid] && messageStore[jid][id]) {
+        return messageStore[jid][id];
+    }
+    return null;
+}
+
+function checkSpam(userId) {
+    const now = Date.now();
+    
+    if (blockedUsers.has(userId)) {
+        const blockEnd = blockedUsers.get(userId);
+        if (now < blockEnd) {
+            return { isBlocked: true, timeLeft: Math.ceil((blockEnd - now) / 1000) };
+        } else {
+            blockedUsers.delete(userId);
+            spamTracker.delete(userId);
+        }
+    }
+    
+    if (!spamTracker.has(userId)) {
+        spamTracker.set(userId, []);
+    }
+    
+    const userMessages = spamTracker.get(userId);
+    const recentMessages = userMessages.filter(time => now - time < SPAM_WINDOW);
+    
+    recentMessages.push(now);
+    spamTracker.set(userId, recentMessages);
+    
+    if (recentMessages.length > SPAM_LIMIT) {
+        const blockUntil = now + BLOCK_DURATION;
+        blockedUsers.set(userId, blockUntil);
+        return { isSpam: true, blockUntil };
+    }
+    
+    return { isOk: true };
+}
+
 function formatRuntime(ms) {
     const seconds = Math.floor((ms / 1000) % 60);
     const minutes = Math.floor((ms / (1000 * 60)) % 60);
@@ -174,943 +679,235 @@ function formatRuntime(ms) {
     return result.trim() || '0s';
 }
 
-function scrambleWord(word) {
-    const letters = word.split('');
-    for (let i = letters.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [letters[i], letters[j]] = [letters[j], letters[i]];
-    }
-    return letters.join('');
-}
-
-// 🔥 GAME API FUNCTIONS - SEMUA GAME DIAMBIL DARI API
-async function fetchFromGameAPI(endpoint, params = {}) {
+async function downloadMediaMessage(message, mediaType) {
     try {
-        const url = `${GAME_API_BASE}/${endpoint}`;
-        const response = await axios.get(url, {
-            params: {
-                api_key: GAME_API_KEY,
-                bot_name: BOT_NAME,
-                ...params
-            },
-            timeout: 10000
-        });
-        
-        return response.data;
+        const stream = await downloadContentFromMessage(message, mediaType);
+        const chunks = [];
+        for await (const chunk of stream) chunks.push(chunk);
+        return Buffer.concat(chunks);
     } catch (error) {
-        console.error(`❌ API Error (${endpoint}):`, error.message);
-        return getFallbackData(endpoint);
+        console.error('Download error:', error.message);
+        throw error;
     }
 }
 
-async function getGameData(gameType, options = {}) {
-    const cacheKey = `${gameType}_${JSON.stringify(options)}`;
-    const now = Date.now();
-    
-    // Check cache (5 minutes)
-    if (gameStates.gameDataCache.has(cacheKey)) {
-        const cached = gameStates.gameDataCache.get(cacheKey);
-        if (now - cached.timestamp < 5 * 60 * 1000) {
-            return cached.data;
-        }
-    }
-    
+async function createSticker(buffer, isVideo) {
     try {
-        let data;
+        const tempDir = './temp';
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
         
-        switch(gameType) {
-            case 'tebakkata':
-                data = await fetchFromGameAPI('games/tebak-kata', options);
-                if (!data || !data.word) throw new Error('Invalid data');
-                return {
-                    word: data.word.toUpperCase(),
-                    scrambled: scrambleWord(data.word.toUpperCase()),
-                    hint: data.hint || 'Tebak kata ini',
-                    category: data.category || 'general',
-                    difficulty: data.difficulty || 'medium'
-                };
+        const timestamp = Date.now();
+        
+        if (isVideo) {
+            const inputPath = path.join(tempDir, `input_${timestamp}.mp4`);
+            const outputPath = path.join(tempDir, `sticker_${timestamp}.webp`);
+            
+            fs.writeFileSync(inputPath, buffer);
+            
+            await execPromise(`ffmpeg -i "${inputPath}" -vf "scale=512:512:force_original_aspect_ratio=decrease,format=rgba" -c:v libwebp -lossless 0 -q:v 80 -compression_level 6 -preset default -loop 0 -an -t 7 "${outputPath}"`);
+            
+            const stickerBuffer = fs.readFileSync(outputPath);
+            fs.unlinkSync(inputPath);
+            fs.unlinkSync(outputPath);
+            
+            return stickerBuffer;
+        } else {
+            const stickerBuffer = await sharp(buffer)
+                .resize(512, 512, {
+                    fit: 'contain',
+                    background: { r: 0, g: 0, b: 0, alpha: 0 }
+                })
+                .webp({ quality: 95 })
+                .toBuffer();
+            
+            return stickerBuffer;
+        }
+    } catch (error) {
+        console.error('Sticker error:', error.message);
+        throw error;
+    }
+}
+
+async function convertStickerToImage(stickerBuffer) {
+    try {
+        const tempDir = './temp';
+        if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+        
+        const timestamp = Date.now();
+        const inputPath = path.join(tempDir, `sticker_${timestamp}.webp`);
+        const outputPath = path.join(tempDir, `image_${timestamp}.png`);
+        
+        fs.writeFileSync(inputPath, stickerBuffer);
+        
+        await sharp(inputPath)
+            .png()
+            .toFile(outputPath);
+        
+        const imageBuffer = fs.readFileSync(outputPath);
+        
+        fs.unlinkSync(inputPath);
+        fs.unlinkSync(outputPath);
+        
+        return imageBuffer;
+    } catch (error) {
+        console.error('Sticker to image error:', error.message);
+        throw error;
+    }
+}
+
+// 🌟 ANTI VIEWONCE FUNCTION - FIXED VERSION
+async function saveViewOnceMedia(sock, m) {
+    try {
+        if (!m.message) return;
+        
+        const msg = m.message;
+        const sender = m.key.remoteJid;
+        const senderName = m.pushName || 'Unknown';
+        const messageId = m.key.id;
+        
+        // Cek apakah ini view once message
+        const isViewOnce = 
+            msg.viewOnceMessageV2 || 
+            msg.viewOnceMessageV2Extension || 
+            msg.viewOnceMessage || 
+            (m.key && m.key.isViewOnce);
+        
+        if (!isViewOnce) {
+            // Cek juga di extendedTextMessage
+            if (msg.extendedTextMessage?.contextInfo?.quotedMessage) {
+                const quotedMsg = msg.extendedTextMessage.contextInfo.quotedMessage;
+                const quotedIsViewOnce = 
+                    quotedMsg.viewOnceMessageV2 || 
+                    quotedMsg.viewOnceMessageV2Extension || 
+                    quotedMsg.viewOnceMessage;
                 
-            case 'tebakgambar':
-                data = await fetchFromGameAPI('games/tebak-gambar', options);
-                if (!data || !data.image_url) throw new Error('Invalid data');
-                return {
-                    image_url: data.image_url,
-                    answer: data.answer.toLowerCase(),
-                    hint: data.hint || 'Tebak apa ini',
-                    category: data.category || 'object'
-                };
-                
-            case 'quiz':
-                data = await fetchFromGameAPI('games/quiz', options);
-                if (!data || !data.question) throw new Error('Invalid data');
-                return {
-                    question: data.question,
-                    options: data.options || ['A. Option 1', 'B. Option 2', 'C. Option 3', 'D. Option 4'],
-                    answer: data.answer || 'A',
-                    explanation: data.explanation,
-                    category: data.category || 'general',
-                    difficulty: data.difficulty || 'medium',
-                    point: data.point || 10
-                };
-                
-            case 'truth':
-                data = await fetchFromGameAPI('games/truth', options);
-                if (!data || !data.question) throw new Error('Invalid data');
-                return data.question;
-                
-            case 'dare':
-                data = await fetchFromGameAPI('games/dare', options);
-                if (!data || !data.challenge) throw new Error('Invalid data');
-                return data.challenge;
-                
-            case 'tebaklagu':
-                data = await fetchFromGameAPI('games/tebak-lagu', options);
-                if (!data || !data.title) throw new Error('Invalid data');
-                return {
-                    title: data.title,
-                    artist: data.artist || 'Unknown Artist',
-                    year: data.year || 'Unknown',
-                    hint: data.hint || 'Tebak judul lagu ini',
-                    preview_url: data.preview_url
-                };
-                
-            case 'tebakbendera':
-                data = await fetchFromGameAPI('games/tebak-bendera', options);
-                if (!data || !data.country) throw new Error('Invalid data');
-                return {
-                    country: data.country,
-                    emoji: data.emoji || '🏳️',
-                    capital: data.capital || 'Unknown',
-                    hint: data.hint || 'Tebak negara ini',
-                    continent: data.continent || 'Unknown'
-                };
-                
-            case 'tebakemoji':
-                data = await fetchFromGameAPI('games/tebak-emoji', options);
-                if (!data || !data.emoji) throw new Error('Invalid data');
-                return {
-                    emoji: data.emoji,
-                    answer: data.answer,
-                    hint: data.hint || 'Tebak arti emoji ini'
-                };
-                
-            case 'tebaklirik':
-                data = await fetchFromGameAPI('games/tebak-lirik', options);
-                if (!data || !data.lyric) throw new Error('Invalid data');
-                return {
-                    lyric: data.lyric,
-                    next_line: data.next_line,
-                    song_title: data.song_title || 'Unknown Song',
-                    artist: data.artist || 'Unknown Artist',
-                    hint: data.hint || 'Sambung lirik berikutnya'
-                };
-                
-            case 'math':
-                data = await fetchFromGameAPI('games/math', options);
-                if (!data || !data.expression) throw new Error('Invalid data');
-                return {
-                    expression: data.expression,
-                    answer: data.answer,
-                    difficulty: data.difficulty || 'easy',
-                    time_limit: data.time_limit || 30
-                };
-                
-            case 'tebakangka':
-                // Generate random number
-                return {
-                    number: getRandomInt(1, 100),
-                    hint: 'Angka antara 1-100',
-                    max_attempts: 10
-                };
-                
-            case 'werewolf_roles':
-                data = await fetchFromGameAPI('games/werewolf/roles', options);
-                if (!data || !data.roles) throw new Error('Invalid data');
-                return data.roles;
-                
-            case 'rpg_items':
-                data = await fetchFromGameAPI('rpg/items', options);
-                if (!data || !data.items) throw new Error('Invalid data');
-                return data.items;
-                
-            case 'gacha_items':
-                data = await fetchFromGameAPI('games/gacha/items', options);
-                if (!data || !data.items) throw new Error('Invalid data');
-                return data.items;
-                
-            case 'pet_types':
-                data = await fetchFromGameAPI('games/pet/types', options);
-                if (!data || !data.pets) throw new Error('Invalid data');
-                return data.pets;
-                
-            default:
-                throw new Error(`Unknown game type: ${gameType}`);
+                if (!quotedIsViewOnce) return;
+            } else {
+                return;
+            }
         }
         
-        // Cache the data
-        gameStates.gameDataCache.set(cacheKey, {
-            data: data,
-            timestamp: now
-        });
+        console.log(`🔍 View Once message detected from ${senderName}`);
         
-        return data;
+        let mediaBuffer = null;
+        let mediaType = null;
+        let caption = '';
         
-    } catch (error) {
-        console.error(`❌ Error getting ${gameType}:`, error.message);
-        return getFallbackData(gameType);
-    }
-}
-
-function getFallbackData(gameType) {
-    const fallbackData = {
-        tebakkata: () => ({
-            word: 'KOMPUTER',
-            scrambled: scrambleWord('KOMPUTER'),
-            hint: 'Alat untuk mengolah data',
-            category: 'technology',
-            difficulty: 'easy'
-        }),
+        // Extract view once content
+        let viewOnceContent = null;
         
-        tebakgambar: () => ({
-            image_url: 'https://i.imgur.com/3A6Y7aB.jpeg',
-            answer: 'kucing',
-            hint: 'Hewan peliharaan',
-            category: 'animal'
-        }),
-        
-        quiz: () => ({
-            question: 'Ibukota Indonesia adalah?',
-            options: ['A. Jakarta', 'B. Bandung', 'C. Surabaya', 'D. Medan'],
-            answer: 'A',
-            explanation: 'Jakarta adalah ibukota Indonesia',
-            category: 'geography',
-            difficulty: 'easy',
-            point: 10
-        }),
-        
-        truth: () => 'Apa rahasia terbesar yang kamu sembunyikan dari teman-teman?',
-        
-        dare: () => 'Kirim suara kamu menyanyi lagu populer!',
-        
-        tebaklagu: () => ({
-            title: 'Smooth Criminal',
-            artist: 'Michael Jackson',
-            year: '1987',
-            hint: 'Lagu tentang kejahatan',
-            preview_url: null
-        }),
-        
-        tebakbendera: () => ({
-            country: 'Indonesia',
-            emoji: '🇮🇩',
-            capital: 'Jakarta',
-            hint: 'Merah Putih',
-            continent: 'Asia'
-        }),
-        
-        tebakemoji: () => ({
-            emoji: '🍜🔥',
-            answer: 'mie pedas',
-            hint: 'Makanan pedas'
-        }),
-        
-        tebaklirik: () => ({
-            lyric: 'Kisah klasik untuk dunia',
-            next_line: 'Yang selalu terngiang di telinga',
-            song_title: 'Unknown Song',
-            artist: 'Unknown Artist',
-            hint: 'Sambung lirik berikutnya'
-        }),
-        
-        math: () => ({
-            expression: `${getRandomInt(1, 20)} + ${getRandomInt(1, 20)}`,
-            answer: getRandomInt(2, 40),
-            difficulty: 'easy',
-            time_limit: 30
-        }),
-        
-        tebakangka: () => ({
-            number: getRandomInt(1, 100),
-            hint: 'Angka antara 1-100',
-            max_attempts: 10
-        }),
-        
-        werewolf_roles: () => [
-            { name: 'Werewolf', description: 'Pemakan manusia di malam hari', team: 'evil' },
-            { name: 'Villager', description: 'Warga desa yang baik', team: 'good' },
-            { name: 'Seer', description: 'Dapat melihat identitas pemain', team: 'good' },
-            { name: 'Doctor', description: 'Dapat menyembuhkan pemain', team: 'good' }
-        ],
-        
-        rpg_items: () => [
-            { id: 1, name: '⚔️ Pedang Besi', price: 100, type: 'weapon', power: 10 },
-            { id: 2, name: '🛡️ Perisai Kayu', price: 80, type: 'armor', defense: 8 },
-            { id: 3, name: '❤️ Potion Kecil', price: 30, type: 'potion', heal: 50 },
-            { id: 4, name: '❤️ Potion Besar', price: 60, type: 'potion', heal: 100 }
-        ],
-        
-        gacha_items: () => [
-            { name: '🪙 100 Koin', rarity: 'common', value: 100 },
-            { name: '🪙 500 Koin', rarity: 'rare', value: 500 },
-            { name: '💎 Batu Langka', rarity: 'epic', value: 1000 },
-            { name: '👑 Mahkota Emas', rarity: 'legendary', value: 5000 }
-        ],
-        
-        pet_types: () => [
-            { name: '🐉 Naga Kecil', type: 'dragon', rarity: 'legendary' },
-            { name: '🐱 Kucing Ajaib', type: 'cat', rarity: 'common' },
-            { name: '🐕 Anjing Setia', type: 'dog', rarity: 'common' },
-            { name: '🦄 Unicorn', type: 'unicorn', rarity: 'legendary' }
-        ]
-    };
-    
-    return fallbackData[gameType] ? fallbackData[gameType]() : null;
-}
-
-// Coin System Functions
-function getCoins(userId) {
-    return gameStates.userCoins.get(userId) || 0;
-}
-
-function addCoins(userId, amount) {
-    const current = getCoins(userId);
-    gameStates.userCoins.set(userId, current + amount);
-    return current + amount;
-}
-
-function deductCoins(userId, amount) {
-    const current = getCoins(userId);
-    if (current >= amount) {
-        gameStates.userCoins.set(userId, current - amount);
-        return true;
-    }
-    return false;
-}
-
-// RPG System Functions
-function getRPGProfile(userId) {
-    if (!gameStates.rpgProfiles.has(userId)) {
-        gameStates.rpgProfiles.set(userId, {
-            level: 1,
-            exp: 0,
-            hp: 100,
-            maxHp: 100,
-            attack: 10,
-            defense: 5,
-            lastDaily: 0,
-            lastWork: 0,
-            lastHunt: 0,
-            created: Date.now()
-        });
-    }
-    return gameStates.rpgProfiles.get(userId);
-}
-
-function addExp(userId, expAmount) {
-    const profile = getRPGProfile(userId);
-    profile.exp += expAmount;
-    
-    // Level up
-    const expNeeded = profile.level * 100;
-    if (profile.exp >= expNeeded) {
-        profile.level++;
-        profile.exp = profile.exp - expNeeded;
-        profile.maxHp += 20;
-        profile.hp = profile.maxHp;
-        profile.attack += 5;
-        profile.defense += 3;
-        return true;
-    }
-    return false;
-}
-
-function getInventory(userId) {
-    if (!gameStates.rpgInventory.has(userId)) {
-        gameStates.rpgInventory.set(userId, []);
-    }
-    return gameStates.rpgInventory.get(userId);
-}
-
-function addToInventory(userId, item) {
-    const inventory = getInventory(userId);
-    inventory.push(item);
-    return inventory;
-}
-
-// Cooldown System
-function checkCooldown(userId, type) {
-    if (!gameStates.rpgCooldowns.has(userId)) {
-        gameStates.rpgCooldowns.set(userId, {});
-    }
-    
-    const cooldowns = gameStates.rpgCooldowns.get(userId);
-    const now = Date.now();
-    
-    switch(type) {
-        case 'daily':
-            if (cooldowns.daily && now - cooldowns.daily < 24 * 60 * 60 * 1000) {
-                const remaining = 24 * 60 * 60 * 1000 - (now - cooldowns.daily);
-                return { onCooldown: true, remaining };
+        if (msg.viewOnceMessageV2) {
+            viewOnceContent = msg.viewOnceMessageV2.message;
+        } else if (msg.viewOnceMessageV2Extension) {
+            viewOnceContent = msg.viewOnceMessageV2Extension.message;
+        } else if (msg.viewOnceMessage) {
+            viewOnceContent = msg.viewOnceMessage.message;
+        } else if (msg.extendedTextMessage?.contextInfo?.quotedMessage) {
+            const quotedMsg = msg.extendedTextMessage.contextInfo.quotedMessage;
+            if (quotedMsg.viewOnceMessageV2) {
+                viewOnceContent = quotedMsg.viewOnceMessageV2.message;
+            } else if (quotedMsg.viewOnceMessageV2Extension) {
+                viewOnceContent = quotedMsg.viewOnceMessageV2Extension.message;
+            } else if (quotedMsg.viewOnceMessage) {
+                viewOnceContent = quotedMsg.viewOnceMessage.message;
             }
-            cooldowns.daily = now;
-            return { onCooldown: false };
-            
-        case 'work':
-            if (cooldowns.work && now - cooldowns.work < 5 * 60 * 1000) {
-                const remaining = 5 * 60 * 1000 - (now - cooldowns.work);
-                return { onCooldown: true, remaining };
-            }
-            cooldowns.work = now;
-            return { onCooldown: false };
-            
-        case 'hunt':
-            if (cooldowns.hunt && now - cooldowns.hunt < 10 * 60 * 1000) {
-                const remaining = 10 * 60 * 1000 - (now - cooldowns.hunt);
-                return { onCooldown: true, remaining };
-            }
-            cooldowns.hunt = now;
-            return { onCooldown: false };
-            
-        case 'fight':
-            if (cooldowns.fight && now - cooldowns.fight < 2 * 60 * 1000) {
-                const remaining = 2 * 60 * 1000 - (now - cooldowns.fight);
-                return { onCooldown: true, remaining };
-            }
-            cooldowns.fight = now;
-            return { onCooldown: false };
-            
-        case 'spin':
-            if (cooldowns.spin && now - cooldowns.spin < 1 * 60 * 1000) {
-                const remaining = 1 * 60 * 1000 - (now - cooldowns.spin);
-                return { onCooldown: true, remaining };
-            }
-            cooldowns.spin = now;
-            return { onCooldown: false };
-    }
-    
-    return { onCooldown: false };
-}
-
-function formatTime(ms) {
-    const seconds = Math.floor(ms / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    
-    if (hours > 0) return `${hours} jam ${minutes % 60} menit`;
-    if (minutes > 0) return `${minutes} menit ${seconds % 60} detik`;
-    return `${seconds} detik`;
-}
-
-// Leaderboard Functions
-function updateLeaderboard(userId, points, groupId = null) {
-    // Global leaderboard
-    const currentGlobal = gameStates.globalLeaderboard.get(userId) || 0;
-    gameStates.globalLeaderboard.set(userId, currentGlobal + points);
-    
-    // Group leaderboard
-    if (groupId) {
-        if (!gameStates.groupLeaderboard.has(groupId)) {
-            gameStates.groupLeaderboard.set(groupId, new Map());
         }
-        const groupBoard = gameStates.groupLeaderboard.get(groupId);
-        const currentGroup = groupBoard.get(userId) || 0;
-        groupBoard.set(userId, currentGroup + points);
-    }
-}
-
-function getGlobalLeaderboard(limit = 10) {
-    const entries = Array.from(gameStates.globalLeaderboard.entries());
-    entries.sort((a, b) => b[1] - a[1]);
-    return entries.slice(0, limit);
-}
-
-function getGroupLeaderboard(groupId, limit = 10) {
-    if (!gameStates.groupLeaderboard.has(groupId)) return [];
-    const entries = Array.from(gameStates.groupLeaderboard.get(groupId).entries());
-    entries.sort((a, b) => b[1] - a[1]);
-    return entries.slice(0, limit);
-}
-
-// Game Functions - Semua game sekarang menggunakan API
-async function startTebakKata(sock, sender, pushName) {
-    try {
-        const gameData = await getGameData('tebakkata', { difficulty: 'medium' });
         
-        gameStates.tebakKata.set(sender, {
-            answer: gameData.word,
-            scrambled: gameData.scrambled,
-            hint: gameData.hint,
-            category: gameData.category,
-            attempts: 0,
-            startTime: Date.now(),
-            timer: setTimeout(() => {
-                gameStates.tebakKata.delete(sender);
-                sock.sendMessage(sender, { 
-                    text: `⏰ *WAKTU HABIS!*\n\nKata yang benar: ${gameData.word}\n\nKetik .tebakkata untuk bermain lagi!` 
-                });
-            }, 30000) // 30 detik
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🎮 *TEBAK KATA* 🎮 ┃\n' +
-            '┃   (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `Susun kata: *${gameData.scrambled}*\n\n` +
-            `📚 Kategori: ${gameData.category}\n` +
-            `💡 Hint: ${gameData.hint}\n` +
-            `⏰ Waktu: 30 detik\n` +
-            `🎯 Kesempatan: 3x\n` +
-            `💰 Hadiah: 50 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Ketik jawabanmu sekarang!';
-        
-        await sock.sendMessage(sender, { text: gameText });
-    } catch (error) {
-        console.error('Error starting tebakkata:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat game. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startTebakGambar(sock, sender, pushName) {
-    try {
-        const gameData = await getGameData('tebakgambar', { category: 'animal' });
-        
-        gameStates.tebakGambar.set(sender, {
-            answer: gameData.answer,
-            hint: gameData.hint,
-            category: gameData.category,
-            attempts: 0,
-            startTime: Date.now()
-        });
-        
-        // Download and send image
-        const response = await axios.get(gameData.image_url, { 
-            responseType: 'arraybuffer',
-            timeout: 10000
-        });
-        
-        const imageBuffer = Buffer.from(response.data);
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🖼️ *TEBAK GAMBAR* 🖼️ ┃\n' +
-            '┃   (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            '❓ Apa yang ada di gambar ini?\n\n' +
-            `📚 Kategori: ${gameData.category}\n` +
-            `💡 Hint: ${gameData.hint}\n` +
-            `🎯 Kesempatan: 3x\n` +
-            `💰 Hadiah: 75 koin`;
-        
-        await sock.sendMessage(sender, { 
-            image: imageBuffer,
-            caption: gameText
-        });
-    } catch (error) {
-        console.error('Error starting tebakgambar:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat gambar. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startQuiz(sock, sender, pushName) {
-    try {
-        const gameData = await getGameData('quiz', { category: 'general' });
-        
-        gameStates.quizGames.set(sender, {
-            ...gameData,
-            startTime: Date.now(),
-            answered: false
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🎯 *KUIS* 🎯 ┃\n' +
-            '┃  (API Powered)   ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `❓ ${gameData.question}\n\n` +
-            `${gameData.options.join('\n')}\n\n` +
-            `📚 Kategori: ${gameData.category}\n` +
-            `🎯 Kesulitan: ${gameData.difficulty}\n` +
-            `⏰ Waktu: 30 detik\n` +
-            `💰 Hadiah: ${gameData.point} koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Jawab dengan huruf (A/B/C/D)';
-        
-        await sock.sendMessage(sender, { text: gameText });
-        
-        // Set timeout
-        setTimeout(() => {
-            if (gameStates.quizGames.has(sender)) {
-                const game = gameStates.quizGames.get(sender);
-                if (!game.answered) {
-                    gameStates.quizGames.delete(sender);
-                    sock.sendMessage(sender, { 
-                        text: `⏰ *WAKTU HABIS!*\n\nJawaban: ${game.answer}\nPenjelasan: ${game.explanation || '-'}\n\nKetik .quiz untuk main lagi!` 
-                    });
+        if (viewOnceContent) {
+            // Cek tipe media
+            if (viewOnceContent.imageMessage) {
+                mediaType = 'image';
+                try {
+                    mediaBuffer = await downloadMediaMessage(viewOnceContent.imageMessage, 'image');
+                    caption = viewOnceContent.imageMessage.caption || '';
+                    console.log(`✅ View Once image downloaded: ${mediaBuffer.length} bytes`);
+                } catch (error) {
+                    console.error('Error downloading view once image:', error.message);
+                    return;
+                }
+            } else if (viewOnceContent.videoMessage) {
+                mediaType = 'video';
+                try {
+                    mediaBuffer = await downloadMediaMessage(viewOnceContent.videoMessage, 'video');
+                    caption = viewOnceContent.videoMessage.caption || '';
+                    console.log(`✅ View Once video downloaded: ${mediaBuffer.length} bytes`);
+                } catch (error) {
+                    console.error('Error downloading view once video:', error.message);
+                    return;
                 }
             }
-        }, 30000);
+        }
         
-    } catch (error) {
-        console.error('Error starting quiz:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat kuis. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startTruth(sock, sender, pushName) {
-    try {
-        const question = await getGameData('truth');
-        
-        await sock.sendMessage(sender, { 
-            text: `🤫 *TRUTH*\n\n${question}\n\n━━━━━━━━━━━━━━━━━━━━\n💬 Jawab dengan jujur ya!` 
-        });
-    } catch (error) {
-        console.error('Error getting truth:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat truth. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startDare(sock, sender, pushName) {
-    try {
-        const challenge = await getGameData('dare');
-        
-        await sock.sendMessage(sender, { 
-            text: `😈 *DARE*\n\n${challenge}\n\n━━━━━━━━━━━━━━━━━━━━\n⚡ Lakukan dalam 5 menit!` 
-        });
-    } catch (error) {
-        console.error('Error getting dare:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat dare. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startTebakLagu(sock, sender, pushName) {
-    try {
-        const songData = await getGameData('tebaklagu');
-        
-        gameStates.tebakLagu.set(sender, {
-            answer: songData.title.toLowerCase(),
-            artist: songData.artist,
-            year: songData.year,
-            hint: songData.hint,
-            attempts: 0,
-            hintGiven: false,
-            startTime: Date.now()
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🎵 *TEBAK LAGU* 🎵 ┃\n' +
-            '┃   (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            '🎶 Dengarkan lagu ini!\n\n' +
-            `🎤 Artis: ${songData.artist}\n` +
-            `📅 Tahun: ${songData.year}\n` +
-            `💡 Clue: ${songData.hint}\n` +
-            `🎯 Kesempatan: 3x\n` +
-            `💰 Hadiah: 100 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Tebak judul lagunya!\n\n' +
-            '💡 Ketik "hint" untuk bantuan tambahan';
-        
-        await sock.sendMessage(sender, { text: gameText });
-    } catch (error) {
-        console.error('Error starting tebaklagu:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat game. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startTebakBendera(sock, sender, pushName) {
-    try {
-        const flagData = await getGameData('tebakbendera');
-        
-        gameStates.tebakBendera.set(sender, {
-            answer: flagData.country.toLowerCase(),
-            emoji: flagData.emoji,
-            capital: flagData.capital,
-            continent: flagData.continent,
-            hint: flagData.hint,
-            attempts: 0,
-            startTime: Date.now()
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🏳️ *TEBAK BENDERA* 🏳️ ┃\n' +
-            '┃    (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `Bendera: ${flagData.emoji}\n\n` +
-            `💡 Clue: ${flagData.hint}\n` +
-            `🌍 Benua: ${flagData.continent}\n` +
-            `🎯 Kesempatan: 3x\n` +
-            `💰 Hadiah: 60 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Negara apakah ini?';
-        
-        await sock.sendMessage(sender, { text: gameText });
-    } catch (error) {
-        console.error('Error starting tebakbendera:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat game. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startTebakEmoji(sock, sender, pushName) {
-    try {
-        const emojiData = await getGameData('tebakemoji');
-        
-        gameStates.tebakEmoji.set(sender, {
-            answer: emojiData.answer.toLowerCase(),
-            emoji: emojiData.emoji,
-            hint: emojiData.hint,
-            attempts: 0,
-            startTime: Date.now()
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 😀 *TEBAK EMOJI* 😀 ┃\n' +
-            '┃   (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `Emoji: ${emojiData.emoji}\n\n` +
-            `💡 Hint: ${emojiData.hint}\n` +
-            `🎯 Kesempatan: 3x\n` +
-            `💰 Hadiah: 40 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Apa maksud dari emoji ini?';
-        
-        await sock.sendMessage(sender, { text: gameText });
-    } catch (error) {
-        console.error('Error starting tebakemoji:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat game. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startTebakLirik(sock, sender, pushName) {
-    try {
-        const lyricData = await getGameData('tebaklirik');
-        
-        gameStates.tebakLirik.set(sender, {
-            answer: lyricData.next_line.toLowerCase(),
-            lyric: lyricData.lyric,
-            song_title: lyricData.song_title,
-            artist: lyricData.artist,
-            hint: lyricData.hint,
-            attempts: 0,
-            startTime: Date.now()
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🎵 *TEBAK LIRIK* 🎵 ┃\n' +
-            '┃   (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `🎶 Lagu: ${lyricData.song_title}\n` +
-            `🎤 Artis: ${lyricData.artist}\n\n` +
-            `"${lyricData.lyric}"\n\n` +
-            `💡 ${lyricData.hint}\n` +
-            `🎯 Kesempatan: 3x\n` +
-            `💰 Hadiah: 55 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Sambung lirik berikutnya!';
-        
-        await sock.sendMessage(sender, { text: gameText });
-    } catch (error) {
-        console.error('Error starting tebaklirik:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat game. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startMathBattle(sock, sender, pushName) {
-    try {
-        const mathData = await getGameData('math', { difficulty: 'medium' });
-        
-        gameStates.mathBattle.set(sender, {
-            answer: mathData.answer,
-            expression: mathData.expression,
-            difficulty: mathData.difficulty,
-            startTime: Date.now(),
-            winner: null
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🧮 *MATH BATTLE* 🧮 ┃\n' +
-            '┃   (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `Soal: ${mathData.expression} = ?\n\n` +
-            `🎯 Kesulitan: ${mathData.difficulty}\n` +
-            `⏰ Waktu: ${mathData.time_limit} detik\n` +
-            `💰 Hadiah: 100 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            '⚡ Yang jawab duluan menang!';
-        
-        await sock.sendMessage(sender, { text: gameText });
-        
-        // Set timeout
-        setTimeout(() => {
-            if (gameStates.mathBattle.has(sender)) {
-                const game = gameStates.mathBattle.get(sender);
-                if (!game.winner) {
-                    gameStates.mathBattle.delete(sender);
-                    sock.sendMessage(sender, { 
-                        text: `⏰ *WAKTU HABIS!*\n\nJawaban: ${game.answer}\n\nKetik .mathbattle untuk main lagi!` 
-                    });
+        if (mediaBuffer && mediaType) {
+            // Save to file
+            const timestamp = Date.now();
+            const safeName = senderName.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+            const fileName = `viewonce_${timestamp}_${safeName}.${mediaType === 'image' ? 'jpg' : 'mp4'}`;
+            const filePath = path.join(VIEWONCE_SAVE_FOLDER, fileName);
+            
+            try {
+                fs.writeFileSync(filePath, mediaBuffer);
+                console.log(`✅ View Once ${mediaType} saved: ${fileName}`);
+            } catch (error) {
+                console.error('Error saving view once file:', error.message);
+                return;
+            }
+            
+            // Simpan ke map untuk diakses nanti
+            viewOnceMessages.set(messageId, {
+                sender,
+                senderName,
+                timestamp,
+                mediaType,
+                filePath,
+                caption,
+                saved: true
+            });
+            
+            // Kirim notifikasi ke owner
+            if (sender !== OWNER_JID) {
+                const notif = 
+                    `🚨 *VIEW ONCE DETECTED!*\n\n` +
+                    `👤 From: ${senderName}\n` +
+                    `📞 Number: ${sender.split('@')[0]}\n` +
+                    `📁 Type: ${mediaType.toUpperCase()}\n` +
+                    `⏰ Time: ${new Date().toLocaleTimeString('id-ID')}\n` +
+                    (caption ? `📝 Caption: ${caption.substring(0, 50)}...\n` : '') +
+                    `\n⚠️ Media telah disimpan secara otomatis.`;
+                
+                try {
+                    await sock.sendMessage(OWNER_JID, { text: notif });
+                } catch (error) {
+                    console.error('Error sending notification to owner:', error.message);
                 }
             }
-        }, mathData.time_limit * 1000);
-        
-    } catch (error) {
-        console.error('Error starting mathbattle:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat game. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startTebakAngka(sock, sender, pushName) {
-    try {
-        const numberData = await getGameData('tebakangka');
-        
-        gameStates.tebakAngka.set(sender, {
-            answer: numberData.number,
-            hint: numberData.hint,
-            maxAttempts: numberData.max_attempts,
-            attempts: 0,
-            startTime: Date.now(),
-            min: 1,
-            max: 100
-        });
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🔢 *TEBAK ANGKA* 🔢 ┃\n' +
-            '┃   (API Powered)    ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `Saya memilih angka ${numberData.hint}\n\n` +
-            `💡 Saya akan kasih clue:\n` +
-            `"Terlalu besar" / "Terlalu kecil"\n\n` +
-            `🎯 Kesempatan: ${numberData.max_attempts}x\n` +
-            `💰 Hadiah: 150 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Tebak angkanya!';
-        
-        await sock.sendMessage(sender, { text: gameText });
-    } catch (error) {
-        console.error('Error starting tebakangka:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memuat game. Coba lagi nanti!' 
-        });
-    }
-}
-
-async function startSuit(sock, sender, pushName) {
-    const choices = [
-        { emoji: '🪨', name: 'batu', beats: 'gunting' },
-        { emoji: '✂️', name: 'gunting', beats: 'kertas' },
-        { emoji: '📄', name: 'kertas', beats: 'batu' }
-    ];
-    
-    gameStates.suitGames.set(sender, {
-        choices: choices,
-        waiting: true
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ ✂️ *SUIT* ✂️ ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        'Pilih salah satu:\n\n' +
-        '`.suit batu` - 🪨 Batu\n' +
-        '`.suit gunting` - ✂️ Gunting\n' +
-        '`.suit kertas` - 📄 Kertas\n\n' +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Lawan: Bot 🤖';
-    
-    await sock.sendMessage(sender, { text: gameText });
-}
-
-async function startWerewolf(sock, sender, pushName) {
-    try {
-        if (!sender.endsWith('@g.us')) {
-            await sock.sendMessage(sender, { 
-                text: '❌ Werewolf hanya bisa dimainkan di grup!' 
-            });
-            return;
+            
+            // Kirim kembali media ke pengirim (optional)
+            try {
+                const replyMsg = 
+                    `⚠️ *VIEW ONCE DETECTED*\n\n` +
+                    `Media view once telah disimpan oleh sistem.\n` +
+                    `⏰ ${new Date().toLocaleTimeString('id-ID')}`;
+                
+                if (mediaType === 'image') {
+                    await sock.sendMessage(sender, {
+                        image: mediaBuffer,
+                        caption: replyMsg
+                    }, { quoted: m });
+                } else if (mediaType === 'video') {
+                    await sock.sendMessage(sender, {
+                        video: mediaBuffer,
+                        caption: replyMsg
+                    }, { quoted: m });
+                }
+            } catch (error) {
+                console.error('Error sending view once back to sender:', error.message);
+            }
+        } else {
+            console.log('❌ View Once detected but no media found');
         }
-        
-        // Get group participants
-        const groupMetadata = await sock.groupMetadata(sender);
-        const participants = groupMetadata.participants.filter(p => !p.id.endsWith('@s.whatsapp.net'));
-        
-        if (participants.length < 4) {
-            await sock.sendMessage(sender, { 
-                text: '❌ Minimal 4 pemain untuk bermain Werewolf!' 
-            });
-            return;
-        }
-        
-        const roles = await getGameData('werewolf_roles');
-        const shuffledPlayers = shuffleArray([...participants]);
-        
-        // Assign roles
-        const assignedRoles = {};
-        shuffledPlayers.forEach((player, index) => {
-            const role = roles[index % roles.length];
-            assignedRoles[player.id] = role;
-        });
-        
-        gameStates.werewolfGames.set(sender, {
-            players: participants.map(p => p.id),
-            roles: assignedRoles,
-            phase: 'setup',
-            alive: participants.map(p => p.id),
-            votes: {},
-            day: 1
-        });
-        
-        // Send role DMs
-        for (const player of participants) {
-            const role = assignedRoles[player.id];
-            await sock.sendMessage(player.id, {
-                text: `🎭 *ROLE WEREWOLF*\n\nKamu adalah: *${role.name}*\n\n${role.description}\n\nTim: ${role.team === 'evil' ? '😈 JAHAT' : '😇 BAIK'}\n\nJangan beritahu siapapun!`
-            });
-        }
-        
-        const gameText = 
-            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-            '┃ 🐺 *WEREWOLF* 🐺 ┃\n' +
-            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-            `🎮 Game Werewolf dimulai!\n` +
-            `👥 Pemain: ${participants.length} orang\n\n` +
-            `📱 Role sudah dikirim via DM!\n\n` +
-            `🌙 Malam pertama dimulai...\n\n` +
-            `💡 Pemain Werewolf, ketik .ww kill @target di DM`;
-        
-        await sock.sendMessage(sender, { text: gameText });
-        
     } catch (error) {
-        console.error('Error starting werewolf:', error);
-        await sock.sendMessage(sender, { 
-            text: '❌ Gagal memulai game Werewolf!' 
-        });
+        console.error('❌ Anti View Once error:', error.message);
     }
 }
 
@@ -1118,441 +915,322 @@ async function startWerewolf(sock, sender, pushName) {
 const app = express();
 app.use(express.json());
 
-// API Endpoints untuk mengelola game
-app.get('/api/games', async (req, res) => {
-    try {
-        const games = [
-            { id: 'tebakkata', name: 'Tebak Kata', description: 'Susun kata acak' },
-            { id: 'tebakgambar', name: 'Tebak Gambar', description: 'Tebak objek dalam gambar' },
-            { id: 'quiz', name: 'Quiz', description: 'Kuis pilihan ganda' },
-            { id: 'tebaklagu', name: 'Tebak Lagu', description: 'Tebak judul lagu' },
-            { id: 'tebakbendera', name: 'Tebak Bendera', description: 'Tebak negara dari bendera' },
-            { id: 'tebakemoji', name: 'Tebak Emoji', description: 'Tebak arti emoji' },
-            { id: 'tebaklirik', name: 'Tebak Lirik', description: 'Sambung lirik lagu' },
-            { id: 'mathbattle', name: 'Math Battle', description: 'Hitungan cepat' },
-            { id: 'suit', name: 'Suit', description: 'Batu gunting kertas' },
-            { id: 'tebakangka', name: 'Tebak Angka', description: 'Tebak angka 1-100' }
-        ];
-        
-        res.json({ success: true, games });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-app.get('/api/stats', (req, res) => {
-    const stats = {
-        active_games: {
-            tebakkata: gameStates.tebakKata.size,
-            quiz: gameStates.quizGames.size,
-            mathbattle: gameStates.mathBattle.size,
-            tebakangka: gameStates.tebakAngka.size
-        },
-        rpg_users: gameStates.rpgProfiles.size,
-        total_coins: Array.from(gameStates.userCoins.values()).reduce((a, b) => a + b, 0),
-        leaderboard_entries: gameStates.globalLeaderboard.size,
-        cache_size: gameStates.gameDataCache.size
-    };
-    
-    res.json({ success: true, stats });
-});
-
-app.get('/api/leaderboard', (req, res) => {
-    const limit = parseInt(req.query.limit) || 10;
-    const top = getGlobalLeaderboard(limit);
-    
-    const leaderboard = top.map(([userId, points], index) => ({
-        rank: index + 1,
-        userId: userId.split('@')[0],
-        points: points
-    }));
-    
-    res.json({ success: true, leaderboard });
-});
-
-app.post('/api/add-game', async (req, res) => {
-    try {
-        const { api_key, game_type, data } = req.body;
-        
-        if (api_key !== GAME_API_KEY) {
-            return res.status(401).json({ success: false, error: 'Unauthorized' });
-        }
-        
-        // Clear cache untuk game type tertentu
-        for (const [key, value] of gameStates.gameDataCache.entries()) {
-            if (key.startsWith(game_type)) {
-                gameStates.gameDataCache.delete(key);
-            }
-        }
-        
-        res.json({ success: true, message: 'Cache cleared' });
-    } catch (error) {
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
 app.get('/', (req, res) => {
-    const stats = {
-        active_games: gameStates.tebakKata.size + gameStates.quizGames.size + gameStates.mathBattle.size,
-        rpg_users: gameStates.rpgProfiles.size,
-        total_coins: Array.from(gameStates.userCoins.values()).reduce((a, b) => a + b, 0),
-        uptime: formatRuntime(Date.now() - BOT_START_TIME)
-    };
-    
-    res.send(`
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>${BOT_NAME} - Game Dashboard</title>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <style>
-                * {
-                    margin: 0;
-                    padding: 0;
-                    box-sizing: border-box;
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                }
-                
-                body {
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    min-height: 100vh;
-                    padding: 20px;
-                    color: #333;
-                }
-                
-                .container {
-                    max-width: 1200px;
-                    margin: 0 auto;
-                }
-                
-                header {
-                    background: white;
-                    padding: 30px;
-                    border-radius: 20px;
-                    margin-bottom: 30px;
-                    text-align: center;
-                    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-                }
-                
-                h1 {
-                    color: #667eea;
-                    margin-bottom: 10px;
-                    font-size: 2.5rem;
-                }
-                
-                .subtitle {
-                    color: #666;
-                    font-size: 1.1rem;
-                    margin-bottom: 20px;
-                }
-                
-                .stats-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                    gap: 20px;
-                    margin-bottom: 30px;
-                }
-                
-                .stat-card {
-                    background: white;
-                    padding: 25px;
-                    border-radius: 15px;
-                    text-align: center;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
-                    transition: transform 0.3s ease;
-                }
-                
-                .stat-card:hover {
-                    transform: translateY(-5px);
-                }
-                
-                .stat-icon {
-                    font-size: 2.5rem;
-                    margin-bottom: 15px;
-                }
-                
-                .stat-value {
-                    font-size: 2rem;
-                    font-weight: bold;
-                    color: #667eea;
-                    margin-bottom: 5px;
-                }
-                
-                .stat-label {
-                    color: #666;
-                    font-size: 0.9rem;
-                }
-                
-                .games-grid {
-                    display: grid;
-                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-                    gap: 20px;
-                }
-                
-                .game-card {
-                    background: white;
-                    padding: 25px;
-                    border-radius: 15px;
-                    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
-                }
-                
-                .game-card h3 {
-                    color: #667eea;
-                    margin-bottom: 15px;
-                    padding-bottom: 10px;
-                    border-bottom: 2px solid #f0f0f0;
-                }
-                
-                .game-list {
-                    list-style: none;
-                }
-                
-                .game-list li {
-                    padding: 12px 0;
-                    border-bottom: 1px solid #f5f5f5;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }
-                
-                .game-list li:last-child {
-                    border-bottom: none;
-                }
-                
-                .api-status {
-                    background: white;
-                    padding: 25px;
-                    border-radius: 15px;
-                    margin-top: 30px;
-                }
-                
-                .status-online {
-                    color: #4CAF50;
-                    font-weight: bold;
-                }
-                
-                .api-info {
-                    margin-top: 15px;
-                    padding: 15px;
-                    background: #f8f9fa;
-                    border-radius: 10px;
-                    font-family: monospace;
-                    font-size: 0.9rem;
-                }
-                
-                footer {
-                    text-align: center;
-                    margin-top: 40px;
-                    color: white;
-                    padding: 20px;
-                }
-                
-                .refresh-btn {
-                    background: #667eea;
-                    color: white;
-                    border: none;
-                    padding: 12px 25px;
-                    border-radius: 10px;
-                    cursor: pointer;
-                    font-size: 1rem;
-                    margin-top: 20px;
-                    transition: background 0.3s ease;
-                }
-                
-                .refresh-btn:hover {
-                    background: #5a67d8;
-                }
-                
-                @media (max-width: 768px) {
-                    .container {
-                        padding: 10px;
-                    }
-                    
-                    header {
+    if (currentQR) {
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>${BOT_NAME}</title>
+                <style>
+                    * { margin: 0; padding: 0; box-sizing: border-box; }
+                    body {
+                        font-family: 'Arial', sans-serif;
+                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        min-height: 100vh;
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
                         padding: 20px;
                     }
-                    
+                    .container {
+                        background: white;
+                        padding: 40px;
+                        border-radius: 20px;
+                        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                        text-align: center;
+                        max-width: 500px;
+                        width: 100%;
+                    }
                     h1 {
-                        font-size: 2rem;
+                        color: #667eea;
+                        margin-bottom: 20px;
+                        font-size: 28px;
                     }
-                    
-                    .games-grid {
-                        grid-template-columns: 1fr;
+                    #qrcode {
+                        margin: 20px auto;
+                        padding: 20px;
+                        background: white;
+                        border-radius: 10px;
+                        display: inline-block;
+                        border: 3px solid #667eea;
                     }
-                }
-            </style>
-        </head>
-        <body>
-            <div class="container">
-                <header>
+                    .info {
+                        color: #666;
+                        margin-top: 20px;
+                        font-size: 14px;
+                    }
+                    .features {
+                        margin-top: 20px;
+                        text-align: left;
+                        background: #f8f9fa;
+                        padding: 15px;
+                        border-radius: 10px;
+                    }
+                    .features h3 {
+                        color: #667eea;
+                        margin-bottom: 10px;
+                    }
+                    .features ul {
+                        list-style: none;
+                        padding: 0;
+                    }
+                    .features li {
+                        padding: 5px 0;
+                        border-bottom: 1px solid #eee;
+                    }
+                    .features li:last-child {
+                        border-bottom: none;
+                    }
+                    .status {
+                        display: inline-block;
+                        padding: 5px 15px;
+                        background: #4CAF50;
+                        color: white;
+                        border-radius: 20px;
+                        font-size: 12px;
+                        margin-left: 10px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="container">
                     <h1>🤖 ${BOT_NAME}</h1>
-                    <p class="subtitle">WhatsApp Bot with Dynamic Games from API</p>
-                    <button class="refresh-btn" onclick="location.reload()">🔄 Refresh Stats</button>
-                </header>
-                
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon">🎮</div>
-                        <div class="stat-value">${stats.active_games}</div>
-                        <div class="stat-label">Active Games</div>
+                    <p>Scan QR Code di bawah untuk menghubungkan bot WhatsApp</p>
+                    <div id="qrcode"></div>
+                    
+                    <div class="features">
+                        <h3>✨ Fitur yang Tersedia:</h3>
+                        <ul>
+                            <li>🎮 Games AI Generated <span class="status">ACTIVE</span></li>
+                            <li>📥 Downloader (YT, TikTok, IG) <span class="status">UPDATED</span></li>
+                            <li>👥 Group Management <span class="status">ACTIVE</span></li>
+                            <li>🛠️ Tools & Utilities <span class="status">ACTIVE</span></li>
+                            <li>😂 Fun & Entertainment <span class="status">ACTIVE</span></li>
+                            <li>🎨 Sticker & Image Tools <span class="status">ACTIVE</span></li>
+                            <li>🚨 Anti View Once <span class="status">FIXED</span></li>
+                            <li>👋 Welcome & Leave Message <span class="status">ACTIVE</span></li>
+                        </ul>
                     </div>
                     
-                    <div class="stat-card">
-                        <div class="stat-icon">👥</div>
-                        <div class="stat-value">${stats.rpg_users}</div>
-                        <div class="stat-label">RPG Players</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-icon">💰</div>
-                        <div class="stat-value">${stats.total_coins.toLocaleString()}</div>
-                        <div class="stat-label">Total Coins</div>
-                    </div>
-                    
-                    <div class="stat-card">
-                        <div class="stat-icon">⏱️</div>
-                        <div class="stat-value">${stats.uptime}</div>
-                        <div class="stat-label">Uptime</div>
-                    </div>
+                    <p class="info">Owner: ${OWNER_NUMBER}</p>
+                    <p class="info">Database: MongoDB ✓</p>
+                    <p class="info">Bot akan otomatis refresh setelah QR di-scan</p>
                 </div>
                 
-                <div class="games-grid">
-                    <div class="game-card">
-                        <h3>🎮 Word Games</h3>
-                        <ul class="game-list">
-                            <li>.tebakkata <span>🔤</span></li>
-                            <li>.tebakemoji <span>😀</span></li>
-                            <li>.tebaklirik <span>🎵</span></li>
-                            <li>.quiz <span>🧠</span></li>
-                        </ul>
-                    </div>
-                    
-                    <div class="game-card">
-                        <h3>🖼️ Visual Games</h3>
-                        <ul class="game-list">
-                            <li>.tebakgambar <span>📸</span></li>
-                            <li>.tebakbendera <span>🏳️</span></li>
-                            <li>.tebaklagu <span>🎶</span></li>
-                        </ul>
-                    </div>
-                    
-                    <div class="game-card">
-                        <h3>⚔️ RPG System</h3>
-                        <ul class="game-list">
-                            <li>.profile <span>👤</span></li>
-                            <li>.daily <span>🎁</span></li>
-                            <li>.work <span>💼</span></li>
-                            <li>.hunt <span>🏹</span></li>
-                            <li>.shop <span>🛒</span></li>
-                            <li>.inventory <span>📦</span></li>
-                        </ul>
-                    </div>
-                    
-                    <div class="game-card">
-                        <h3>🎲 Casual Games</h3>
-                        <ul class="game-list">
-                            <li>.truth <span>🤫</span></li>
-                            <li>.dare <span>😈</span></li>
-                            <li>.suit <span>✂️</span></li>
-                            <li>.mathbattle <span>🧮</span></li>
-                            <li>.tebakangka <span>🔢</span></li>
-                            <li>.spin <span>🎰</span></li>
-                        </ul>
-                    </div>
-                </div>
-                
-                <div class="api-status">
-                    <h3>🔧 API Status</h3>
-                    <p>Game Source: <span class="status-online">${GAME_API_BASE}</span></p>
-                    <div class="api-info">
-                        📁 Semua game data diambil dari API<br>
-                        🔄 Auto refresh setiap 5 menit<br>
-                        📊 Total cache: ${gameStates.gameDataCache.size} items
-                    </div>
-                </div>
-            </div>
-            
-            <footer>
-                <p>© 2024 ${BOT_NAME} - All games powered by dynamic API</p>
-                <p>👤 Owner: ${OWNER_NUMBER} | ⚡ Real-time Game Updates</p>
-            </footer>
-            
-            <script>
-                // Auto-refresh every 60 seconds
-                setTimeout(() => location.reload(), 60000);
-                
-                // Fetch live stats
-                async function fetchStats() {
-                    try {
-                        const response = await fetch('/api/stats');
-                        const data = await response.json();
-                        if (data.success) {
-                            console.log('Live Stats:', data.stats);
+                <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
+                <script>
+                    const qr = '${currentQR}';
+                    QRCode.toCanvas(document.createElement('canvas'), qr, {
+                        width: 256,
+                        margin: 2,
+                        color: {
+                            dark: '#667eea',
+                            light: '#ffffff'
                         }
-                    } catch (error) {
-                        console.error('Error fetching stats:', error);
+                    }, function(error, canvas) {
+                        if (error) {
+                            document.getElementById('qrcode').innerHTML = 'Error generating QR';
+                            return;
+                        }
+                        document.getElementById('qrcode').appendChild(canvas);
+                    });
+                    
+                    setTimeout(() => {
+                        location.reload();
+                    }, 10000);
+                </script>
+            </body>
+            </html>
+        `);
+    } else {
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>${BOT_NAME}</title>
+                <meta http-equiv="refresh" content="10">
+                <style>
+                    * { margin: 0; padding: 0; }
+                    body {
+                        font-family: Arial, sans-serif;
+                        background: linear-gradient(135deg, #667eea, #764ba2);
+                        display: flex;
+                        justify-content: center;
+                        align-items: center;
+                        min-height: 100vh;
+                        padding: 20px;
                     }
-                }
-                
-                // Initial fetch
-                fetchStats();
-                
-                // Update every 30 seconds
-                setInterval(fetchStats, 30000);
-            </script>
-        </body>
-        </html>
-    `);
+                    .status-box {
+                        background: white;
+                        padding: 50px;
+                        border-radius: 20px;
+                        text-align: center;
+                        box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+                        max-width: 600px;
+                        width: 100%;
+                    }
+                    h1 {
+                        color: #667eea;
+                        margin-bottom: 20px;
+                        font-size: 32px;
+                    }
+                    .status {
+                        padding: 15px 30px;
+                        background: #4CAF50;
+                        color: white;
+                        border-radius: 25px;
+                        font-weight: bold;
+                        margin: 20px 0;
+                        font-size: 18px;
+                        display: inline-block;
+                    }
+                    .stats {
+                        display: grid;
+                        grid-template-columns: repeat(2, 1fr);
+                        gap: 15px;
+                        margin: 20px 0;
+                    }
+                    .stat-item {
+                        background: #f8f9fa;
+                        padding: 15px;
+                        border-radius: 10px;
+                        text-align: center;
+                    }
+                    .stat-item h3 {
+                        color: #667eea;
+                        margin: 0 0 5px 0;
+                        font-size: 14px;
+                    }
+                    .stat-item p {
+                        font-size: 18px;
+                        font-weight: bold;
+                        margin: 0;
+                        color: #333;
+                    }
+                    .owner {
+                        color: #666;
+                        margin-top: 20px;
+                        font-size: 14px;
+                    }
+                </style>
+            </head>
+            <body>
+                <div class="status-box">
+                    <h1>🤖 ${BOT_NAME}</h1>
+                    <div class="status">✅ ONLINE & CONNECTED</div>
+                    <p>Bot sedang berjalan dengan normal</p>
+                    
+                    <div class="stats">
+                        <div class="stat-item">
+                            <h3>⏰ UPTIME</h3>
+                            <p>${formatRuntime(Date.now() - BOT_START_TIME)}</p>
+                        </div>
+                        <div class="stat-item">
+                            <h3>🎮 GAMES</h3>
+                            <p>AI Generated</p>
+                        </div>
+                        <div class="stat-item">
+                            <h3>📥 DOWNLOADER</h3>
+                            <p>UPDATED</p>
+                        </div>
+                        <div class="stat-item">
+                            <h3>🚨 ANTI VIEWONCE</h3>
+                            <p>FIXED</p>
+                        </div>
+                        <div class="stat-item">
+                            <h3>👋 WELCOME/LEAVE</h3>
+                            <p>ACTIVE</p>
+                        </div>
+                        <div class="stat-item">
+                            <h3>📊 MESSAGES</h3>
+                            <p>${Object.keys(messageStore).length}</p>
+                        </div>
+                    </div>
+                    
+                    <div class="owner">👤 Owner: ${OWNER_NUMBER}</div>
+                    <div class="owner">💾 Database: MongoDB ✓</div>
+                    <div class="owner">🔄 Halaman ini akan refresh otomatis</div>
+                </div>
+            </body>
+            </html>
+        `);
+    }
 });
 
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
         bot: BOT_NAME,
-        api_base: GAME_API_BASE,
+        owner: OWNER_NUMBER,
         uptime: formatRuntime(Date.now() - BOT_START_TIME),
-        games_active: gameStates.tebakKata.size + gameStates.quizGames.size,
-        rpg_users: gameStates.rpgProfiles.size,
-        total_coins: Array.from(gameStates.userCoins.values()).reduce((a, b) => a + b, 0),
-        cache_size: gameStates.gameDataCache.size,
+        viewonce_saved: Array.from(viewOnceMessages.values()).length,
+        groups: welcomeEnabled.size,
+        database: 'MongoDB',
         timestamp: new Date().toISOString()
     });
 });
 
+// Endpoint untuk melihat saved view once
+app.get('/viewonce', (req, res) => {
+    try {
+        const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
+            .filter(f => f.startsWith('viewonce_'))
+            .map(f => ({
+                name: f,
+                path: `/viewonce/files/${f}`,
+                size: fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, f)).size,
+                time: fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, f)).mtime
+            }));
+        
+        res.json({
+            total: files.length,
+            files: files
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.use('/viewonce/files', express.static(VIEWONCE_SAVE_FOLDER));
+
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
-    console.log(`🌐 Dashboard: http://localhost:${PORT}`);
-    console.log(`🎮 Game API: ${GAME_API_BASE}`);
-    console.log(`🔑 API Key: ${GAME_API_KEY ? 'SET' : 'NOT SET'}`);
+    console.log(`🌐 Health check: http://localhost:${PORT}/health`);
+    console.log(`📁 View Once files: http://localhost:${PORT}/viewonce`);
+    console.log(`🚨 Anti View Once: ${ANTI_VIEWONCE_ENABLED ? 'ENABLED' : 'DISABLED'}`);
+    console.log(`💾 Database: MongoDB`);
 });
 
 // Main Bot Function
 async function startBot() {
     try {
-        console.log('🚀 Starting WhatsApp Bot with Dynamic Games...');
+        console.log('🚀 Starting WhatsApp Bot...');
         
+        // ✅ PAKAI MONGODB AUTH (GANTI DARI useMultiFileAuthState)
         const { state, saveCreds, clearData } = await useMongoAuthState();
         const { version } = await fetchLatestBaileysVersion();
         
         console.log(`📱 WhatsApp v${version.join('.')}`);
         console.log(`🤖 Bot: ${BOT_NAME}`);
-        console.log(`🎮 Game Mode: DYNAMIC API`);
-        console.log(`🌐 API Base: ${GAME_API_BASE}`);
-        console.log(`💰 Coin System: Active`);
-        console.log(`🏆 Leaderboard: Active`);
-        console.log(`⚔️ RPG System: Active`);
+        console.log(`👤 Owner: ${OWNER_NUMBER}`);
+        console.log(`💾 Database: MongoDB`);
 
         const sock = makeWASocket({
             version,
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: true,
+            printQRInTerminal: false,
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
             },
             msgRetryCounterCache,
             browser: Browsers.macOS('Desktop'),
+            getMessage: async (key) => {
+                const msg = getMessage(key.remoteJid, key.id);
+                return msg ? msg.fullMessage.message : null;
+            },
+            shouldIgnoreJid: (jid) => jid?.endsWith('@broadcast') || false,
             markOnlineOnConnect: true,
             generateHighQualityLinkPreview: true,
             syncFullHistory: false
@@ -1561,7 +1239,16 @@ async function startBot() {
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
+            if (qr) {
+                currentQR = qr;
+                console.log('\n╔══════════════════════╗');
+                console.log('║  📱 SCAN QR CODE    ║');
+                console.log('╚══════════════════════╝\n');
+                qrcode.generate(qr, { small: true });
+            }
+            
             if (connection === 'close') {
+                currentQR = null;
                 const statusCode = lastDisconnect?.error?.output?.statusCode;
                 const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
                 
@@ -1574,17 +1261,16 @@ async function startBot() {
                     console.log('❌ Logged out, please scan QR again');
                 }
             } else if (connection === 'open') {
-                console.log('\n╔══════════════════════════════════════════╗');
-                console.log('║  ✅ ' + BOT_NAME + ' ONLINE!             ║');
-                console.log('║  🎮 Dynamic Games from API ✓            ║');
-                console.log('║  🌐 API: ' + GAME_API_BASE + '   ║');
-                console.log('║  💰 Coin System Active ✓                ║');
-                console.log('║  🏆 Leaderboard Active ✓                ║');
-                console.log('║  ⚔️ RPG System Active ✓                 ║');
-                console.log('║  👥 Group Tools Ready ✓                 ║');
-                console.log('║  👋 Welcome/Leave Active ✓              ║');
-                console.log('║  💾 MongoDB Connected ✓                 ║');
-                console.log('╚══════════════════════════════════════════╝\n');
+                currentQR = null;
+                console.log('\n╔═════════════════════════════════╗');
+                console.log('║  ✅ ' + BOT_NAME + ' ONLINE!       ║');
+                console.log('║  🎮 AI Games Ready ✓            ║');
+                console.log('║  📥 Downloader Updated ✓        ║');
+                console.log('║  🚨 Anti View Once Fixed ✓      ║');
+                console.log('║  👥 Group Tools Ready ✓         ║');
+                console.log('║  👋 Welcome/Leave Active ✓      ║');
+                console.log('║  💾 MongoDB Connected ✓         ║');
+                console.log('╚═════════════════════════════════╝\n');
                 
                 try {
                     const dateInfo = getFormattedDate();
@@ -1599,13 +1285,11 @@ async function startBot() {
                         '⏰ ' + dateInfo.time + '\n' +
                         '⏱️ Uptime: ' + runtime + '\n\n' +
                         '━━━━━━━━━━━━━━━━━━━━\n' +
-                        '🎮 Dynamic Games from API ✓\n' +
-                        '🌐 API: ' + GAME_API_BASE + '\n' +
-                        '💰 Coin System Active ✓\n' +
-                        '🏆 Leaderboard Active ✓\n' +
-                        '⚔️ RPG System Active ✓\n' +
-                        '👥 Group Tools Ready ✓\n' +
-                        '👋 Welcome/Leave Active ✓\n' +
+                        '🎮 Games: AI Generated ✓\n' +
+                        '📥 Downloader: Updated ✓\n' +
+                        '🚨 Anti View Once: Fixed ✓\n' +
+                        '👥 Group Tools: Ready ✓\n' +
+                        '👋 Welcome/Leave: Active ✓\n' +
                         '💾 Database: MongoDB ✓\n' +
                         '━━━━━━━━━━━━━━━━━━━━';
                     
@@ -1618,13 +1302,19 @@ async function startBot() {
 
         sock.ev.on('creds.update', saveCreds);
 
-        // Handle group participants update
+        // Handle group participants update - FIXED VERSION
         sock.ev.on('group-participants.update', async (update) => {
             try {
                 const { id, participants, action } = update;
                 
-                if (!id || !participants || !action || !id.endsWith('@g.us')) return;
+                console.log(`📊 Group event: ${action} in ${id}`, participants);
                 
+                if (!id || !participants || !action) return;
+                
+                // Skip jika bukan grup
+                if (!id.endsWith('@g.us')) return;
+                
+                // Tunggu sebentar untuk memastikan metadata grup sudah update
                 await new Promise(resolve => setTimeout(resolve, 2000));
                 
                 let groupMetadata;
@@ -1632,7 +1322,7 @@ async function startBot() {
                     groupMetadata = await sock.groupMetadata(id);
                 } catch (error) {
                     console.error('Error getting group metadata:', error.message);
-                    return;
+                    groupMetadata = { subject: 'Group', participants: [] };
                 }
                 
                 const groupName = groupMetadata.subject || 'Group';
@@ -1640,25 +1330,43 @@ async function startBot() {
                 
                 for (const participant of participants) {
                     try {
+                        // FIX: Handle participant object properly
                         let participantJid = participant;
                         let participantNumber = '';
                         
+                        // Check if participant is a string (jid) or object
                         if (typeof participant === 'string') {
                             participantJid = participant;
                             participantNumber = participant.split('@')[0];
                         } else if (participant && participant.id) {
+                            // If it's an object with id property
                             participantJid = participant.id;
                             participantNumber = participant.id.split('@')[0];
+                        } else {
+                            console.error('Invalid participant format:', participant);
+                            continue;
                         }
                         
-                        if (!participantNumber) continue;
+                        if (!participantNumber) {
+                            console.error('Could not extract number from participant:', participant);
+                            continue;
+                        }
+                        
+                        console.log(`Processing ${action} for ${participantNumber} in group ${groupName}`);
                         
                         if (action === 'add') {
+                            console.log(`🎉 Welcome to group: ${participantNumber}`);
+                            
+                            // Default enable welcome untuk grup baru
                             if (!welcomeEnabled.has(id)) {
                                 welcomeEnabled.set(id, true);
                             }
                             
-                            if (welcomeEnabled.get(id) === false) continue;
+                            // Cek apakah welcome diaktifkan
+                            if (welcomeEnabled.get(id) === false) {
+                                console.log(`⚠️ Welcome disabled for ${id}, skipping...`);
+                                continue;
+                            }
                             
                             const welcomeMsg = 
                                 '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
@@ -1671,7 +1379,7 @@ async function startBot() {
                                 `📌 Grup: ${groupName}\n` +
                                 `👥 Member: ${membersCount} orang\n` +
                                 '━━━━━━━━━━━━━━━━━━━━\n\n' +
-                                '🎮 Ketik .games untuk melihat semua game\n' +
+                                '📝 Ketik .menu untuk melihat fitur bot\n' +
                                 `💻 _${BOT_NAME}_`;
                             
                             await sock.sendMessage(id, { 
@@ -1679,9 +1387,28 @@ async function startBot() {
                                 mentions: [participantJid] 
                             });
                             
+                            // Send reaction
+                            try {
+                                await sock.sendMessage(id, {
+                                    react: {
+                                        text: '🎉',
+                                        key: { remoteJid: id, fromMe: true, id: 'welcome_' + Date.now() }
+                                    }
+                                });
+                            } catch (e) {
+                                // Ignore reaction errors
+                                console.log('Reaction error:', e.message);
+                            }
+                            
                         } else if (action === 'remove') {
+                            console.log(`👋 Leave from group: ${participantNumber}`);
+                            
+                            // Cek apakah yang leave adalah bot sendiri
                             const botJid = sock.user?.id;
-                            if (participantJid === botJid) continue;
+                            if (participantJid === botJid) {
+                                console.log('🤖 Bot removed from group');
+                                continue;
+                            }
                             
                             const leaveMsg = 
                                 '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
@@ -1698,16 +1425,72 @@ async function startBot() {
                                 text: leaveMsg, 
                                 mentions: [participantJid] 
                             });
+                            
+                            // Send reaction
+                            try {
+                                await sock.sendMessage(id, {
+                                    react: {
+                                        text: '😢',
+                                        key: { remoteJid: id, fromMe: true, id: 'leave_' + Date.now() }
+                                    }
+                                });
+                            } catch (e) {
+                                // Ignore reaction errors
+                                console.log('Reaction error:', e.message);
+                            }
                         }
                         
+                        // Delay antar pesan
                         await new Promise(resolve => setTimeout(resolve, 1000));
                         
                     } catch (error) {
-                        console.error(`Error processing ${action}:`, error.message);
+                        console.error(`Error processing ${action} for ${participant}:`, error.message);
                     }
                 }
             } catch (error) {
                 console.error('Group event error:', error.message);
+            }
+        });
+
+        // Juga tambahkan handler untuk group updates
+        sock.ev.on('groups.update', async (updates) => {
+            for (const update of updates) {
+                console.log(`📊 Group update: ${update.id} - ${update.announce || 'settings changed'}`);
+            }
+        });
+
+        // Handle message updates (for anti-delete)
+        sock.ev.on('messages.update', async (updates) => {
+            for (const update of updates) {
+                try {
+                    if (update.update?.messageStubType === 1) {
+                        const msgInfo = getMessage(update.key.remoteJid, update.key.id);
+                        
+                        if (msgInfo?.fullMessage?.message) {
+                            const msg = msgInfo.fullMessage.message;
+                            const deleter = update.key.participant || update.key.remoteJid;
+                            const name = msgInfo.pushName;
+                            
+                            let content = '';
+                            if (msg.conversation) content = msg.conversation;
+                            else if (msg.extendedTextMessage?.text) content = msg.extendedTextMessage.text;
+                            else if (msg.imageMessage?.caption) content = msg.imageMessage.caption;
+                            
+                            let notif = '🚫 *PESAN DIHAPUS!*\n\n';
+                            notif += '👤 @' + deleter.split('@')[0] + '\n';
+                            notif += '📝 ' + name + '\n';
+                            notif += '⏰ ' + new Date().toLocaleTimeString('id-ID') + '\n';
+                            if (content) notif += '\n💬 "' + content + '"';
+                            
+                            await sock.sendMessage(update.key.remoteJid, { 
+                                text: notif, 
+                                mentions: [deleter] 
+                            });
+                        }
+                    }
+                } catch (e) {
+                    console.error('Anti-delete error:', e.message);
+                }
             }
         });
 
@@ -1719,6 +1502,8 @@ async function startBot() {
                 try {
                     if (!m.key || !m.key.remoteJid || m.key.remoteJid === 'status@broadcast') continue;
                     
+                    saveMessage(m);
+                    
                     const sender = m.key.remoteJid;
                     const pushName = m.pushName || 'User';
                     const isGroup = sender.endsWith('@g.us');
@@ -1726,6 +1511,45 @@ async function startBot() {
                     const isOwner = userId === OWNER_JID;
                     
                     if (!m.message) continue;
+                    
+                    // 🚨 ANTI VIEWONCE HANDLER - DIPANGGIL SEBELUM LAINNYA
+                    if (ANTI_VIEWONCE_ENABLED) {
+                        await saveViewOnceMedia(sock, m);
+                    }
+                    
+                    // Auto reaction
+                    if (!m.key.fromMe && Math.random() < 0.3) {
+                        try {
+                            await sock.sendMessage(sender, {
+                                react: {
+                                    text: getRandomReaction(),
+                                    key: m.key
+                                }
+                            });
+                        } catch (e) {
+                            console.error('Reaction error:', e.message);
+                        }
+                    }
+                    
+                    // Check if user is banned
+                    if (bannedUsers.has(userId)) {
+                        await sock.sendMessage(sender, { text: '⛔ *BANNED!*' });
+                        continue;
+                    }
+                    
+                    // Check for spam
+                    const spamCheck = checkSpam(userId);
+                    if (spamCheck.isBlocked) {
+                        await sock.sendMessage(sender, { 
+                            text: `⚠️ *SPAM!* ${spamCheck.timeLeft}s` 
+                        });
+                        continue;
+                    }
+                    
+                    if (spamCheck.isSpam) {
+                        await sock.sendMessage(sender, { text: '🚫 *SPAM!*' });
+                        continue;
+                    }
                     
                     // Extract message text
                     const msg = m.message;
@@ -1745,1068 +1569,955 @@ async function startBot() {
                     const command = text.toLowerCase().trim().split(' ')[0];
                     const args = text.trim().split(' ').slice(1);
                     
-                    // ==================== MENU & GAMES LIST ====================
-                    if (command === '.menu' || command === '.games' || command === '.help') {
-                        const greeting = getGreeting();
-                        const dateInfo = getFormattedDate();
-                        const runtime = formatRuntime(Date.now() - BOT_START_TIME);
-                        const coins = getCoins(userId);
+                    // ==================== MENU ====================
+                    if (command === '.menu') {
+                        console.log(`📋 Menu command from: ${pushName}`);
                         
-                        const menuText = 
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃  🎮 *' + BOT_NAME.toUpperCase() + '* 🎮  ┃\n' +
-                            '┃   (API Powered)    ┃\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            greeting + ', *' + pushName + '*! ✨\n' +
-                            `💰 Koin: ${coins}\n\n` +
-                            '📅 ' + dateInfo.full + '\n' +
-                            '⏰ ' + dateInfo.time + '\n' +
-                            '⏱️ Runtime: ' + runtime + '\n\n' +
+                        try {
+                            const greeting = getGreeting();
+                            const dateInfo = getFormattedDate();
+                            const runtime = formatRuntime(Date.now() - BOT_START_TIME);
                             
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🎯 *WORD GAMES* 🎯\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .tebakkata - Susun kata acak (API)\n' +
-                            '┃ .tebakemoji - Tebak arti emoji (API)\n' +
-                            '┃ .tebaklirik - Sambung lirik lagu (API)\n' +
-                            '┃ .quiz - Kuis pilihan ganda (API)\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                            const loadingMsg = await sock.sendMessage(sender, { 
+                                text: '⏳ _Generating AI motivation..._' 
+                            });
                             
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🖼️ *VISUAL GAMES* 🖼️\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .tebakgambar - Tebak gambar (API)\n' +
-                            '┃ .tebakbendera - Tebak bendera (API)\n' +
-                            '┃ .tebaklagu - Tebak judul lagu (API)\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                            const motivation = await getAICodingMotivation();
                             
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🧠 *FUN GAMES* 🧠\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .truth - Pertanyaan jujur (API)\n' +
-                            '┃ .dare - Tantangan seru (API)\n' +
-                            '┃ .mathbattle - Hitungan cepat (API)\n' +
-                            '┃ .suit - Batu gunting kertas\n' +
-                            '┃ .tebakangka - Tebak angka 1-100\n' +
-                            '┃ .spin - Spin gacha\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                            const menuText = 
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃  💻 *' + BOT_NAME.toUpperCase() + '* 💻  ┃\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                greeting + ', *' + pushName + '*! ✨\n\n' +
+                                '📅 ' + dateInfo.full + '\n' +
+                                '⏰ ' + dateInfo.time + ' WIB\n' +
+                                '⏱️ Runtime: ' + runtime + '\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 💡 *AI Motivation*\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n' +
+                                '_' + motivation + '_\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🎮 *GAMES (AI)*\n' +
+                                '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                                '┃ .tebakkata (AI Generated)\n' +
+                                '┃ .tebakbendera (AI Generated)\n' +
+                                '┃ .kuis (AI Generated)\n' +
+                                '┃ .truth .dare\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 📥 *DOWNLOADER*\n' +
+                                '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                                '┃ .ytmp3 [youtube_url]\n' +
+                                '┃ .ytmp4 [youtube_url]\n' +
+                                '┃ .tiktok [tiktok_url]\n' +
+                                '┃ .ig [instagram_url]\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 👥 *GROUP*\n' +
+                                '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                                '┃ .hidetag [text]\n' +
+                                '┃ .tagall\n' +
+                                '┃ .kick @user\n' +
+                                '┃ .add [nomor]\n' +
+                                '┃ .promote @user\n' +
+                                '┃ .demote @user\n' +
+                                '┃ .linkgc .revoke\n' +
+                                '┃ .enablewelcome\n' +
+                                '┃ .disablewelcome\n' +
+                                '┃ .welcomestatus\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🛠️ *TOOLS*\n' +
+                                '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                                '┃ .ping .runtime\n' +
+                                '┃ .shortlink [url]\n' +
+                                '┃ .resetsession (owner)\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 😂 *FUN*\n' +
+                                '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                                '┃ .quotes .pantun\n' +
+                                '┃ .rate [text]\n' +
+                                '┃ .jodoh [nama]\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🎨 *IMAGE*\n' +
+                                '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                                '┃ .s (sticker)\n' +
+                                '┃ .toimg\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🚨 *SECURITY*\n' +
+                                '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                                '┃ Anti View Once: ✅\n' +
+                                '┃ Anti Delete: ✅\n' +
+                                '┃ Anti Spam: ✅\n' +
+                                '┃ Welcome/Leave: ✅\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '━━━━━━━━━━━━━━━━━━━━\n' +
+                                '👤 Owner: wa.me/' + OWNER_NUMBER + '\n' +
+                                '💾 Database: MongoDB\n' +
+                                '🤖 AI Powered Bot\n' +
+                                '━━━━━━━━━━━━━━━━━━━━';
                             
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ ⚔️ *RPG SYSTEM* ⚔️\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .profile - Profil RPG\n' +
-                            '┃ .daily - Klaim harian (24h)\n' +
-                            '┃ .work - Kerja dapet koin (5m)\n' +
-                            '┃ .hunt - Berburu item (10m)\n' +
-                            '┃ .shop - Toko item (API)\n' +
-                            '┃ .inventory - Inventory\n' +
-                            '┃ .adopt - Adopsi pet (API)\n' +
-                            '┃ .pet - Lihat pet\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                            try {
+                                if (loadingMsg.key) {
+                                    await sock.sendMessage(sender, { 
+                                        delete: loadingMsg.key 
+                                    });
+                                }
+                            } catch (e) {
+                                console.log('Could not delete loading message:', e.message);
+                            }
                             
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🐺 *GROUP GAMES* 🐺\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .ww start - Werewolf game\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 📊 *LEADERBOARD* 📊\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .topglobal - Top 10 global\n' +
-                            '┃ .topgroup - Top 10 grup\n' +
-                            '┃ .myrank - Rank kamu\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🛠️ *TOOLS* 🛠️\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .ping - Test bot\n' +
-                            '┃ .runtime - Uptime bot\n' +
-                            '┃ .owner - Kontak owner\n' +
-                            '┃ .resetsession (owner)\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            
-                            '━━━━━━━━━━━━━━━━━━━━\n' +
-                            '🌐 Semua game diambil dari API\n' +
-                            '💰 Setiap game berikan koin!\n' +
-                            '👤 Owner: wa.me/' + OWNER_NUMBER + '\n' +
-                            '🔧 API: ' + GAME_API_BASE + '\n' +
-                            '━━━━━━━━━━━━━━━━━━━━';
-                        
-                        await sock.sendMessage(sender, { text: menuText });
+                            await sock.sendMessage(sender, { text: menuText });
+                            console.log(`✅ Menu sent to: ${pushName}`);
+                        } catch (error) {
+                            console.error('❌ Menu error:', error.message);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error generating menu: ${error.message}` 
+                            });
+                        }
                         continue;
                     }
                     
-                    // ==================== RESET SESSION (OWNER ONLY) ====================
-                    if (command === '.resetsession' && isOwner) {
-                        await sock.sendMessage(sender, { text: '🔄 *Mereset session MongoDB...*' });
-                        await clearData();
+                   // ==================== RESET SESSION (OWNER ONLY) ====================
+if (command === '.resetsession' && isOwner) {
+    try {
+        await sock.sendMessage(sender, { text: '🔄 *Mereset session MongoDB...*' });
+        
+        // Hapus session di MongoDB
+        await clearData();
+        
+        await sock.sendMessage(sender, { 
+            text: '✅ Session dihapus dari MongoDB!\n\nBot akan restart & QR baru akan muncul dalam 5 detik...' 
+        });
+        
+        // Tunggu 5 detik sebelum restart
+        setTimeout(() => {
+            console.log('🧹 Session reset oleh owner — restarting now');
+            // Keluar dengan kode error (1) agar Heroku restart otomatis
+            process.exit(1);
+        }, 5000);
+        
+    } catch (e) {
+        console.error('❌ Gagal reset session:', e.message);
+        await sock.sendMessage(sender, { 
+            text: `❌ Gagal reset: ${e.message}` 
+        });
+    }
+    continue;
+}
+                    // ==================== WELCOME COMMANDS ====================
+                    
+                    // ENABLE WELCOME
+                    if (command === '.enablewelcome') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        
+                        welcomeEnabled.set(sender, true);
                         await sock.sendMessage(sender, { 
-                            text: '✅ Session dihapus dari MongoDB!\n\nBot akan restart dalam 5 detik...' 
+                            text: '✅ *Fitur Welcome diaktifkan!*\n\nSekarang bot akan mengucapkan selamat datang kepada member baru.' 
                         });
-                        setTimeout(() => process.exit(1), 5000);
                         continue;
                     }
                     
-                    // ==================== GAME 1: TEBAK KATA ====================
+                    // DISABLE WELCOME
+                    if (command === '.disablewelcome') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        
+                        welcomeEnabled.set(sender, false);
+                        await sock.sendMessage(sender, { 
+                            text: '❌ *Fitur Welcome dinonaktifkan!*\n\nBot tidak akan mengucapkan selamat datang lagi.' 
+                        });
+                        continue;
+                    }
+                    
+                    // CHECK WELCOME STATUS
+                    if (command === '.welcomestatus') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        
+                        const status = welcomeEnabled.get(sender) !== false;
+                        await sock.sendMessage(sender, { 
+                            text: `📊 *Status Fitur Welcome*\n\n` +
+                                  `Grup: ${isGroup ? '✅' : '❌'}\n` +
+                                  `Fitur Welcome: ${status ? '✅ AKTIF' : '❌ NONAKTIF'}\n\n` +
+                                  `━━━━━━━━━━━━━━━━━━━━\n` +
+                                  `💡 Gunakan .enablewelcome / .disablewelcome` 
+                        });
+                        continue;
+                    }
+                    
+                    // ==================== DOWNLOADER (FIXED) ====================
+                    
+                    // YTMP3 - FIXED
+                    if (command === '.ytmp3' && args[0]) {
+                        try {
+                            let url = args[0];
+                            
+                            // Perbaiki URL jika diperlukan
+                            if (url.includes('youtu.be')) {
+                                const videoId = url.split('/').pop().split('?')[0];
+                                url = `https://www.youtube.com/watch?v=${videoId}`;
+                            }
+                            
+                            if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL YouTube tidak valid!\n\n💡 Contoh:\n.ytmp3 https://youtube.com/watch?v=...\n.ytmp3 https://youtu.be/...' 
+                                });
+                                continue;
+                            }
+                            
+                            const loadingMsg = await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload audio YouTube...*\n\n📥 Mohon tunggu, proses mungkin memakan waktu 30-60 detik...' 
+                            });
+                            
+                            try {
+                                const result = await downloadYouTube(url, 'mp3');
+                                
+                                const infoText = 
+                                    `✅ *Download Berhasil!*\n\n` +
+                                    `📝 Title: ${result.title}\n` +
+                                    `⏱️ Duration: ${result.duration}\n\n` +
+                                    `📥 Mengirim audio...`;
+                                
+                                await sock.sendMessage(sender, { text: infoText });
+                                
+                                // Download audio file dengan timeout lebih lama
+                                const audioBuffer = await downloadMedia(result.url, {
+                                    timeout: 120000,
+                                    maxContentLength: 50 * 1024 * 1024 // 50MB
+                                });
+                                
+                                // Hapus pesan loading
+                                if (loadingMsg.key) {
+                                    try {
+                                        await sock.sendMessage(sender, { 
+                                            delete: loadingMsg.key 
+                                        });
+                                    } catch (e) {}
+                                }
+                                
+                                await sock.sendMessage(sender, {
+                                    audio: audioBuffer,
+                                    mimetype: 'audio/mpeg',
+                                    fileName: `${result.title.substring(0, 50).replace(/[^\w\s]/gi, '')}.mp3`
+                                });
+                                
+                            } catch (downloadError) {
+                                // Hapus pesan loading
+                                if (loadingMsg.key) {
+                                    try {
+                                        await sock.sendMessage(sender, { 
+                                            delete: loadingMsg.key 
+                                        });
+                                    } catch (e) {}
+                                }
+                                
+                                // Fallback: Kirim link download
+                                await sock.sendMessage(sender, { 
+                                    text: `⚠️ *File terlalu besar untuk dikirim langsung*\n\n📝 Gunakan link berikut untuk download:\n${result?.url || url}\n\n💡 Bot hanya bisa mengirim file hingga 16MB` 
+                                });
+                            }
+                            
+                        } catch (error) {
+                            console.error('YouTube MP3 error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download audio!\n\nError: ${error.message}\n\n💡 Coba gunakan link YouTube yang valid atau coba lagi nanti.` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // YTMP4 - FIXED
+                    if (command === '.ytmp4' && args[0]) {
+                        try {
+                            let url = args[0];
+                            
+                            // Perbaiki URL jika diperlukan
+                            if (url.includes('youtu.be')) {
+                                const videoId = url.split('/').pop().split('?')[0];
+                                url = `https://www.youtube.com/watch?v=${videoId}`;
+                            }
+                            
+                            if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL YouTube tidak valid!\n\n💡 Contoh:\n.ytmp4 https://youtube.com/watch?v=...\n.ytmp4 https://youtu.be/...' 
+                                });
+                                continue;
+                            }
+                            
+                            const loadingMsg = await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload video YouTube...*\n\n📥 Mohon tunggu, proses mungkin memakan waktu 30-60 detik...' 
+                            });
+                            
+                            try {
+                                const result = await downloadYouTube(url, 'mp4');
+                                
+                                const infoText = 
+                                    `✅ *Download Berhasil!*\n\n` +
+                                    `📝 Title: ${result.title}\n` +
+                                    `⏱️ Duration: ${result.duration}\n\n` +
+                                    `📥 Mengirim video...`;
+                                
+                                await sock.sendMessage(sender, { text: infoText });
+                                
+                                // Download video file dengan timeout lebih lama
+                                const videoBuffer = await downloadMedia(result.url, {
+                                    timeout: 120000,
+                                    maxContentLength: 50 * 1024 * 1024 // 50MB
+                                });
+                                
+                                // Hapus pesan loading
+                                if (loadingMsg.key) {
+                                    try {
+                                        await sock.sendMessage(sender, { 
+                                            delete: loadingMsg.key 
+                                        });
+                                    } catch (e) {}
+                                }
+                                
+                                await sock.sendMessage(sender, {
+                                    video: videoBuffer,
+                                    caption: `📹 ${result.title}`,
+                                    fileName: `${result.title.substring(0, 50).replace(/[^\w\s]/gi, '')}.mp4`
+                                });
+                                
+                            } catch (downloadError) {
+                                // Hapus pesan loading
+                                if (loadingMsg.key) {
+                                    try {
+                                        await sock.sendMessage(sender, { 
+                                            delete: loadingMsg.key 
+                                        });
+                                    } catch (e) {}
+                                }
+                                
+                                // Fallback: Kirim link download
+                                await sock.sendMessage(sender, { 
+                                    text: `⚠️ *File terlalu besar untuk dikirim langsung*\n\n📝 Gunakan link berikut untuk download:\n${result?.url || url}\n\n💡 Bot hanya bisa mengirim file hingga 16MB` 
+                                });
+                            }
+                            
+                        } catch (error) {
+                            console.error('YouTube MP4 error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download video!\n\nError: ${error.message}\n\n💡 Coba gunakan link YouTube yang valid atau coba lagi nanti.` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // TIKTOK - FIXED
+                    if (command === '.tiktok' && args[0]) {
+                        try {
+                            const url = args[0];
+                            if (!url.includes('tiktok.com')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL TikTok tidak valid!\n\n💡 Contoh: .tiktok https://tiktok.com/@user/video/...' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload video TikTok...*\n\n📥 Mohon tunggu, proses mungkin memakan waktu beberapa detik...' 
+                            });
+                            
+                            const result = await downloadTikTok(url);
+                            
+                            const infoText = 
+                                `✅ *Download Berhasil!*\n\n` +
+                                `📝 Title: ${result.title}\n` +
+                                `👤 Author: ${result.author}\n` +
+                                `⏱️ Duration: ${result.duration}s\n\n` +
+                                `📥 Mengirim video...`;
+                            
+                            await sock.sendMessage(sender, { text: infoText });
+                            
+                            // Download video file
+                            const videoBuffer = await downloadMedia(result.url);
+                            
+                            await sock.sendMessage(sender, {
+                                video: videoBuffer,
+                                caption: `📹 TikTok - ${result.author}`,
+                                fileName: `tiktok_${Date.now()}.mp4`
+                            });
+                            
+                        } catch (error) {
+                            console.error('TikTok error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download TikTok!\n\nError: ${error.message}\n\n💡 Coba gunakan link TikTok yang valid.` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // INSTAGRAM - FIXED
+                    if (command === '.ig' && args[0]) {
+                        try {
+                            const url = args[0];
+                            if (!url.includes('instagram.com')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL Instagram tidak valid!\n\n💡 Contoh:\n.ig https://instagram.com/p/...\n.ig https://www.instagram.com/reel/...' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload dari Instagram...*\n\n📥 Mohon tunggu, proses mungkin memakan waktu beberapa detik...' 
+                            });
+                            
+                            const result = await downloadInstagram(url);
+                            
+                            const infoText = 
+                                `✅ *Download Berhasil!*\n\n` +
+                                `📝 Title: ${result.title}\n` +
+                                `📁 Type: ${result.type.toUpperCase()}\n\n` +
+                                `📥 Mengirim ${result.type}...`;
+                            
+                            await sock.sendMessage(sender, { text: infoText });
+                            
+                            // Download media file
+                            const mediaBuffer = await downloadMedia(result.url);
+                            
+                            if (result.type === 'video') {
+                                await sock.sendMessage(sender, {
+                                    video: mediaBuffer,
+                                    caption: `📹 Instagram Video`,
+                                    fileName: `instagram_${Date.now()}.mp4`
+                                });
+                            } else {
+                                await sock.sendMessage(sender, {
+                                    image: mediaBuffer,
+                                    caption: `📸 Instagram Photo`
+                                });
+                            }
+                            
+                        } catch (error) {
+                            console.error('Instagram error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download Instagram!\n\nError: ${error.message}\n\n💡 Coba gunakan link Instagram yang valid.` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== GAMES (AI GENERATED) ====================
+                    
+                    // TEBAK KATA (AI)
                     if (command === '.tebakkata') {
-                        await startTebakKata(sock, sender, pushName);
+                        try {
+                            await sock.sendMessage(sender, { text: '🎮 Generating AI teka-teki...' });
+                            
+                            const game = await generateGameQuestion('tebakkata');
+                            if (!game) throw new Error('Gagal membuat game');
+                            
+                            tebakKataGames.set(sender, {
+                                ...game,
+                                startTime: Date.now(),
+                                attempts: 0
+                            });
+                            
+                            const gameText = 
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🎮 *TEBAK KATA* 🎮 ┃\n' +
+                                '┃     (AI Generated)   ┃\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '❓ ' + game.question + '\n\n' +
+                                '💡 Kirim jawabanmu! (1 kata)\n' +
+                                '⏰ Kamu punya 3 kesempatan\n\n' +
+                                '━━━━━━━━━━━━━━━━━━━━\n' +
+                                '✨ Ketik .tebakkata untuk game baru';
+                            
+                            await sock.sendMessage(sender, { text: gameText });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}\n\n💡 Coba lagi nanti!` 
+                            });
+                        }
                         continue;
                     }
                     
                     // Check tebak kata answer
-                    if (gameStates.tebakKata.has(sender)) {
-                        const game = gameStates.tebakKata.get(sender);
-                        const userAnswer = text.toUpperCase().trim();
-                        
-                        if (userAnswer === game.answer) {
-                            clearTimeout(game.timer);
-                            gameStates.tebakKata.delete(sender);
-                            const coinsEarned = 50;
-                            addCoins(userId, coinsEarned);
-                            updateLeaderboard(userId, 10, isGroup ? sender : null);
-                            
-                            await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +10 poin leaderboard\n\nKata: ${game.answer}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik\nKategori: ${game.category}` 
-                            });
-                        } else {
-                            game.attempts++;
-                            if (game.attempts >= 3) {
-                                clearTimeout(game.timer);
-                                gameStates.tebakKata.delete(sender);
-                                await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nKata yang benar: ${game.answer}\nKategori: ${game.category}\n\n💡 Ketik .tebakkata untuk bermain lagi` 
-                                });
-                            } else {
-                                const hintMsg = game.attempts === 2 ? `💡 Hint: ${game.hint}\n` : '';
-                                await sock.sendMessage(sender, { 
-                                    text: `❌ *SALAH!*\n\n${hintMsg}Kesempatan tersisa: ${3 - game.attempts}` 
-                                });
-                            }
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== GAME 2: TEBAK GAMBAR ====================
-                    if (command === '.tebakgambar') {
-                        await startTebakGambar(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // Check tebak gambar answer
-                    if (gameStates.tebakGambar.has(sender)) {
-                        const game = gameStates.tebakGambar.get(sender);
+                    if (tebakKataGames.has(sender)) {
+                        const game = tebakKataGames.get(sender);
                         const userAnswer = text.toLowerCase().trim();
                         
-                        if (userAnswer === game.answer) {
-                            gameStates.tebakGambar.delete(sender);
-                            const coinsEarned = 75;
-                            addCoins(userId, coinsEarned);
-                            updateLeaderboard(userId, 15, isGroup ? sender : null);
-                            
+                        game.attempts++;
+                        const isCorrect = userAnswer === game.answer.toLowerCase();
+                        
+                        if (isCorrect) {
+                            tebakKataGames.delete(sender);
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +15 poin leaderboard\n\nJawaban: ${game.answer}\nKategori: ${game.category}` 
+                                text: `✅ *BENAR!*\n\nJawaban: ${game.answer}\n\n🎉 Selamat! Kamu menang!\n⏱️ Waktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
+                            });
+                        } else if (game.attempts >= 3) {
+                            tebakKataGames.delete(sender);
+                            await sock.sendMessage(sender, { 
+                                text: `💀 *GAME OVER!*\n\nJawaban yang benar: ${game.answer}\n\n💡 Ketik .tebakkata untuk bermain lagi` 
                             });
                         } else {
-                            game.attempts++;
-                            if (game.attempts >= 3) {
-                                gameStates.tebakGambar.delete(sender);
-                                await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nJawaban yang benar: ${game.answer}\nKategori: ${game.category}\n\n💡 Ketik .tebakgambar untuk bermain lagi` 
-                                });
-                            } else {
-                                await sock.sendMessage(sender, { 
-                                    text: `❌ *SALAH!*\n\nKesempatan tersisa: ${3 - game.attempts}` 
-                                });
-                            }
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== GAME 3: QUIZ ====================
-                    if (command === '.quiz' || command === '.kuis') {
-                        await startQuiz(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // Check quiz answer
-                    if (gameStates.quizGames.has(sender)) {
-                        const game = gameStates.quizGames.get(sender);
-                        const userAnswer = text.toUpperCase().trim();
-                        
-                        if (userAnswer === game.answer) {
-                            game.answered = true;
-                            gameStates.quizGames.delete(sender);
-                            addCoins(userId, game.point);
-                            updateLeaderboard(userId, 5, isGroup ? sender : null);
-                            
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Jawaban benar!\n💰 +${game.point} koin\n🏆 +5 poin leaderboard\n\n💡 Penjelasan: ${game.explanation || '-'}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
-                            });
-                        } else {
-                            gameStates.quizGames.delete(sender);
-                            await sock.sendMessage(sender, { 
-                                text: `❌ *SALAH!*\n\nJawaban yang benar: ${game.answer}\nPenjelasan: ${game.explanation || '-'}\n\n💡 Ketik .quiz untuk bermain lagi` 
+                                text: `❌ *SALAH!*\n\nKesempatan tersisa: ${3 - game.attempts}\n\n💡 Coba lagi!` 
                             });
                         }
                         continue;
                     }
                     
-                    // ==================== GAME 4: TRUTH OR DARE ====================
-                    if (command === '.truth') {
-                        await startTruth(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    if (command === '.dare') {
-                        await startDare(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // ==================== GAME 5: TEBAK LAGU ====================
-                    if (command === '.tebaklagu') {
-                        await startTebakLagu(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // Check tebak lagu answer
-                    if (gameStates.tebakLagu.has(sender)) {
-                        const game = gameStates.tebakLagu.get(sender);
-                        
-                        if (text.toLowerCase() === 'hint' && !game.hintGiven) {
-                            game.hintGiven = true;
-                            await sock.sendMessage(sender, { 
-                                text: `💡 *HINT TAMBAHAN:* Tahun rilis: ${game.year}\n\n🎯 Kesempatan tersisa: ${3 - game.attempts}` 
-                            });
-                            continue;
-                        }
-                        
-                        const userAnswer = text.toLowerCase().trim();
-                        
-                        if (userAnswer === game.answer) {
-                            gameStates.tebakLagu.delete(sender);
-                            const coinsEarned = 100;
-                            addCoins(userId, coinsEarned);
-                            updateLeaderboard(userId, 20, isGroup ? sender : null);
-                            
-                            await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +20 poin leaderboard\n\nJudul: ${game.answer.toUpperCase()}\nArtis: ${game.artist}\nTahun: ${game.year}` 
-                            });
-                        } else {
-                            game.attempts++;
-                            if (game.attempts >= 3) {
-                                gameStates.tebakLagu.delete(sender);
-                                await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nJudul yang benar: ${game.answer.toUpperCase()}\nArtis: ${game.artist}\nTahun: ${game.year}\n\n💡 Ketik .tebaklagu untuk bermain lagi` 
-                                });
-                            } else {
-                                await sock.sendMessage(sender, { 
-                                    text: `❌ *SALAH!*\n\nKesempatan tersisa: ${3 - game.attempts}` 
-                                });
-                            }
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== GAME 6: TEBAK BENDERA ====================
+                    // TEBAK BENDERA (AI)
                     if (command === '.tebakbendera') {
-                        await startTebakBendera(sock, sender, pushName);
+                        try {
+                            await sock.sendMessage(sender, { text: '🏳️ Generating AI bendera game...' });
+                            
+                            const game = await generateGameQuestion('tebakbendera');
+                            if (!game) throw new Error('Gagal membuat game');
+                            
+                            tebakBenderaGames.set(sender, {
+                                ...game,
+                                startTime: Date.now(),
+                                attempts: 0
+                            });
+                            
+                            const gameText = 
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🏳️ *TEBAK BENDERA* 🏳️ ┃\n' +
+                                '┃    (AI Generated)    ┃\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '🇺🇳 Bendera: ' + game.emoji + '\n' +
+                                '💡 Clue: ' + game.clue + '\n\n' +
+                                '❓ Negara apakah ini?\n\n' +
+                                '⏰ Kamu punya 3 kesempatan\n' +
+                                '✨ Ketik .tebakbendera untuk game baru';
+                            
+                            await sock.sendMessage(sender, { text: gameText });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}\n\n💡 Coba lagi nanti!` 
+                            });
+                        }
                         continue;
                     }
                     
                     // Check tebak bendera answer
-                    if (gameStates.tebakBendera.has(sender)) {
-                        const game = gameStates.tebakBendera.get(sender);
+                    if (tebakBenderaGames.has(sender)) {
+                        const game = tebakBenderaGames.get(sender);
                         const userAnswer = text.toLowerCase().trim();
                         
-                        if (userAnswer === game.answer) {
-                            gameStates.tebakBendera.delete(sender);
-                            const coinsEarned = 60;
-                            addCoins(userId, coinsEarned);
-                            updateLeaderboard(userId, 12, isGroup ? sender : null);
+                        game.attempts++;
+                        const isCorrect = userAnswer === game.country.toLowerCase();
+                        
+                        if (isCorrect) {
+                            tebakBenderaGames.delete(sender);
+                            await sock.sendMessage(sender, { 
+                                text: `✅ *BENAR!*\n\nNegara: ${game.country}\nBendera: ${game.emoji}\n\n🎉 Selamat! Kamu menang!\n⏱️ Waktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
+                            });
+                        } else if (game.attempts >= 3) {
+                            tebakBenderaGames.delete(sender);
+                            await sock.sendMessage(sender, { 
+                                text: `💀 *GAME OVER!*\n\nNegara yang benar: ${game.country}\nBendera: ${game.emoji}\n\n💡 Ketik .tebakbendera untuk bermain lagi` 
+                            });
+                        } else {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ *SALAH!*\n\nKesempatan tersisa: ${3 - game.attempts}\n\n💡 Coba lagi!` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // KUIS (AI)
+                    if (command === '.kuis') {
+                        try {
+                            await sock.sendMessage(sender, { text: '🎯 Generating AI kuis...' });
                             
-                            await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +12 poin leaderboard\n\nNegara: ${game.answer.toUpperCase()}\nIbukota: ${game.capital}\nBenua: ${game.continent}\nBendera: ${game.emoji}` 
-                            });
-                        } else {
-                            game.attempts++;
-                            if (game.attempts >= 3) {
-                                gameStates.tebakBendera.delete(sender);
-                                await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nNegara yang benar: ${game.answer.toUpperCase()}\nIbukota: ${game.capital}\nBenua: ${game.continent}\nBendera: ${game.emoji}\n\n💡 Ketik .tebakbendera untuk bermain lagi` 
-                                });
-                            } else {
-                                await sock.sendMessage(sender, { 
-                                    text: `❌ *SALAH!*\n\nKesempatan tersisa: ${3 - game.attempts}` 
-                                });
-                            }
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== GAME 7: TEBAK EMOJI ====================
-                    if (command === '.tebakemoji') {
-                        await startTebakEmoji(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // Check tebak emoji answer
-                    if (gameStates.tebakEmoji.has(sender)) {
-                        const game = gameStates.tebakEmoji.get(sender);
-                        const userAnswer = text.toLowerCase().trim();
-                        
-                        if (userAnswer === game.answer) {
-                            gameStates.tebakEmoji.delete(sender);
-                            const coinsEarned = 40;
-                            addCoins(userId, coinsEarned);
-                            updateLeaderboard(userId, 8, isGroup ? sender : null);
+                            const game = await generateGameQuestion('kuis');
+                            if (!game) throw new Error('Gagal membuat game');
                             
-                            await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +8 poin leaderboard\n\nEmoji: ${game.emoji}\nArti: ${game.answer}` 
+                            kuisGames.set(sender, {
+                                ...game,
+                                startTime: Date.now(),
+                                attempts: 0
                             });
-                        } else {
-                            game.attempts++;
-                            if (game.attempts >= 3) {
-                                gameStates.tebakEmoji.delete(sender);
-                                await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nArti yang benar: ${game.answer}\nEmoji: ${game.emoji}\n\n💡 Ketik .tebakemoji untuk bermain lagi` 
-                                });
-                            } else {
-                                await sock.sendMessage(sender, { 
-                                    text: `❌ *SALAH!*\n\nKesempatan tersisa: ${3 - game.attempts}` 
-                                });
-                            }
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== GAME 8: TEBAK LIRIK ====================
-                    if (command === '.tebaklirik') {
-                        await startTebakLirik(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // Check tebak lirik answer
-                    if (gameStates.tebakLirik.has(sender)) {
-                        const game = gameStates.tebakLirik.get(sender);
-                        const userAnswer = text.toLowerCase().trim();
-                        
-                        if (userAnswer === game.answer) {
-                            gameStates.tebakLirik.delete(sender);
-                            const coinsEarned = 55;
-                            addCoins(userId, coinsEarned);
-                            updateLeaderboard(userId, 11, isGroup ? sender : null);
                             
+                            const optionsText = game.options.map((opt, idx) => `${idx + 1}. ${opt}`).join('\n');
+                            
+                            const gameText = 
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🎯 *KUIS* 🎯 ┃\n' +
+                                '┃  (AI Generated)   ┃\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '❓ ' + game.question + '\n\n' +
+                                '📝 Pilihan:\n' + optionsText + '\n\n' +
+                                '💡 Jawab dengan angka (1-4) atau teks\n' +
+                                '⏰ Kamu punya 1 kesempatan\n\n' +
+                                '✨ Ketik .kuis untuk kuis baru';
+                            
+                            await sock.sendMessage(sender, { text: gameText });
+                        } catch (error) {
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +11 poin leaderboard\n\nLirik lengkap:\n"${game.lyric}"\n"${game.answer}"\n\nLagu: ${game.song_title}\nArtis: ${game.artist}` 
+                                text: `❌ Error: ${error.message}\n\n💡 Coba lagi nanti!` 
                             });
-                        } else {
-                            game.attempts++;
-                            if (game.attempts >= 3) {
-                                gameStates.tebakLirik.delete(sender);
-                                await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nLirik yang benar:\n"${game.lyric}"\n"${game.answer}"\n\nLagu: ${game.song_title}\nArtis: ${game.artist}\n\n💡 Ketik .tebaklirik untuk bermain lagi` 
-                                });
-                            } else {
-                                await sock.sendMessage(sender, { 
-                                    text: `❌ *SALAH!*\n\nKesempatan tersisa: ${3 - game.attempts}` 
-                                });
+                        }
+                        continue;
+                    }
+                    
+                    // Check kuis answer
+                    if (kuisGames.has(sender)) {
+                        const game = kuisGames.get(sender);
+                        let userAnswer = text.toLowerCase().trim();
+                        
+                        // Convert number to answer
+                        if (/^[1-4]$/.test(userAnswer)) {
+                            const idx = parseInt(userAnswer) - 1;
+                            if (game.options[idx]) {
+                                userAnswer = game.options[idx].toLowerCase();
                             }
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== GAME 9: MATH BATTLE ====================
-                    if (command === '.mathbattle') {
-                        await startMathBattle(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // Check math battle answer
-                    if (gameStates.mathBattle.has(sender)) {
-                        const game = gameStates.mathBattle.get(sender);
-                        const userAnswer = parseInt(text.trim());
-                        
-                        if (!isNaN(userAnswer) && userAnswer === game.answer) {
-                            if (!game.winner) {
-                                game.winner = userId;
-                                gameStates.mathBattle.delete(sender);
-                                const coinsEarned = 100;
-                                addCoins(userId, coinsEarned);
-                                updateLeaderboard(userId, 25, isGroup ? sender : null);
-                                
-                                await sock.sendMessage(sender, { 
-                                    text: `⚡ *PERTAMA BENAR!*\n\n🎉 ${pushName} menang!\n💰 +${coinsEarned} koin\n🏆 +25 poin leaderboard\n\nSoal: ${game.expression} = ${game.answer}\nKesulitan: ${game.difficulty}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
-                                });
-                            }
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== GAME 10: SUIT ====================
-                    if (command.startsWith('.suit')) {
-                        if (command === '.suit') {
-                            await startSuit(sock, sender, pushName);
-                            continue;
-                        }
-                        
-                        const choice = args[0]?.toLowerCase();
-                        const choices = ['batu', 'gunting', 'kertas'];
-                        
-                        if (!choices.includes(choice)) {
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Pilihan tidak valid!\n\nGunakan: .suit batu/gunting/kertas' 
-                            });
-                            continue;
-                        }
-                        
-                        if (!gameStates.suitGames.has(sender)) {
-                            await startSuit(sock, sender, pushName);
-                            continue;
-                        }
-                        
-                        const game = gameStates.suitGames.get(sender);
-                        const botChoice = game.choices[Math.floor(Math.random() * 3)];
-                        let result = '';
-                        let coinsEarned = 0;
-                        
-                        // Determine winner
-                        if (choice === botChoice.name) {
-                            result = '🤝 *SERI!*';
-                            coinsEarned = 10;
-                        } else if (
-                            (choice === 'batu' && botChoice.name === 'gunting') ||
-                            (choice === 'gunting' && botChoice.name === 'kertas') ||
-                            (choice === 'kertas' && botChoice.name === 'batu')
-                        ) {
-                            result = '🎉 *KAMU MENANG!*';
-                            coinsEarned = 50;
-                        } else {
-                            result = '😢 *BOT MENANG!*';
-                            coinsEarned = 5;
-                        }
-                        
-                        addCoins(userId, coinsEarned);
-                        gameStates.suitGames.delete(sender);
-                        
-                        const emojiMap = { batu: '🪨', gunting: '✂️', kertas: '📄' };
-                        
-                        await sock.sendMessage(sender, { 
-                            text: `✂️ *HASIL SUIT*\n\n` +
-                                  `Kamu: ${emojiMap[choice]} (${choice})\n` +
-                                  `Bot: ${emojiMap[botChoice.name]} (${botChoice.name})\n\n` +
-                                  `${result}\n` +
-                                  `💰 +${coinsEarned} koin\n\n` +
-                                  `💡 Ketik .suit untuk main lagi` 
-                        });
-                        continue;
-                    }
-                    
-                    // ==================== GAME 11: TEBAK ANGKA ====================
-                    if (command === '.tebakangka') {
-                        await startTebakAngka(sock, sender, pushName);
-                        continue;
-                    }
-                    
-                    // Check tebak angka answer
-                    if (gameStates.tebakAngka.has(sender)) {
-                        const game = gameStates.tebakAngka.get(sender);
-                        const userAnswer = parseInt(text.trim());
-                        
-                        if (isNaN(userAnswer) || userAnswer < 1 || userAnswer > 100) {
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Masukkan angka 1-100 yang valid!' 
-                            });
-                            continue;
                         }
                         
                         game.attempts++;
+                        const isCorrect = userAnswer === game.answer.toLowerCase();
                         
-                        if (userAnswer === game.answer) {
-                            gameStates.tebakAngka.delete(sender);
-                            const coinsEarned = 150;
-                            addCoins(userId, coinsEarned);
-                            updateLeaderboard(userId, 30, isGroup ? sender : null);
-                            
+                        if (isCorrect) {
+                            kuisGames.delete(sender);
                             await sock.sendMessage(sender, { 
-                                text: `🎉 *BENAR!*\n\nAngka: ${game.answer}\nTebakan: ${game.attempts}x\n💰 +${coinsEarned} koin\n🏆 +30 poin leaderboard\n\nKamu jenius! 🧠` 
-                            });
-                        } else if (game.attempts >= game.maxAttempts) {
-                            gameStates.tebakAngka.delete(sender);
-                            await sock.sendMessage(sender, { 
-                                text: `💀 *GAME OVER!*\n\nAngka yang benar: ${game.answer}\nTebakan: ${game.attempts}x\n\n💡 Ketik .tebakangka untuk bermain lagi` 
+                                text: `✅ *BENAR!*\n\nJawaban: ${game.answer.toUpperCase()}\n\n🎉 Selamat! Kamu menang!\n⏱️ Waktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
                             });
                         } else {
-                            let clue = '';
-                            if (userAnswer < game.answer) {
-                                clue = '📈 Terlalu kecil!';
-                                game.min = Math.max(game.min, userAnswer + 1);
-                            } else {
-                                clue = '📉 Terlalu besar!';
-                                game.max = Math.min(game.max, userAnswer - 1);
-                            }
-                            
+                            kuisGames.delete(sender);
                             await sock.sendMessage(sender, { 
-                                text: `❌ ${clue}\n\nRange: ${game.min}-${game.max}\nTebakan: ${game.attempts}/${game.maxAttempts}\n\nCoba lagi!` 
+                                text: `❌ *SALAH!*\n\nJawaban yang benar: ${game.answer.toUpperCase()}\n\n💡 Ketik .kuis untuk bermain lagi` 
                             });
                         }
                         continue;
                     }
                     
-                    // ==================== WEREWOLF GAME ====================
-                    if (command === '.ww' || command === '.werewolf') {
-                        const subcommand = args[0]?.toLowerCase();
-                        
-                        if (!subcommand) {
-                            await sock.sendMessage(sender, { 
-                                text: '🐺 *WEREWOLF GAME*\n\n.perintah:\n.ww start - Mulai game\n.ww vote @player - Voting\n.ww kill @player - Kill (werewolf only)\n.ww roles - Lihat role\n.ww end - Akhiri game' 
-                            });
-                            continue;
-                        }
-                        
-                        if (subcommand === 'start') {
-                            await startWerewolf(sock, sender, pushName);
-                            continue;
-                        }
-                        
-                        if (subcommand === 'roles') {
-                            if (!gameStates.werewolfGames.has(sender)) {
-                                await sock.sendMessage(sender, { 
-                                    text: '❌ Tidak ada game Werewolf aktif!' 
-                                });
-                                continue;
-                            }
-                            
-                            const game = gameStates.werewolfGames.get(sender);
-                            const rolesText = game.players.map(player => {
-                                const role = game.roles[player];
-                                const status = game.alive.includes(player) ? '❤️ Hidup' : '💀 Mati';
-                                return `@${player.split('@')[0]} - ${role.name} (${status})`;
-                            }).join('\n');
-                            
-                            await sock.sendMessage(sender, { 
-                                text: `🐺 *PLAYER ROLES*\n\n${rolesText}\n\nHari: ${game.day}`,
-                                mentions: game.players
-                            });
-                            continue;
-                        }
-                    }
-                    
-                    // ==================== RPG SYSTEM ====================
-                    
-                    // PROFILE
-                    if (command === '.profile') {
-                        const profile = getRPGProfile(userId);
-                        const coins = getCoins(userId);
-                        const inventory = getInventory(userId);
-                        
-                        const profileText = 
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ ⚔️ *PROFIL RPG* ⚔️ ┃\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            `👤 Nama: ${pushName}\n` +
-                            `⭐ Level: ${profile.level}\n` +
-                            `📈 EXP: ${profile.exp}/${profile.level * 100}\n` +
-                            `❤️ HP: ${profile.hp}/${profile.maxHp}\n` +
-                            `⚔️ Attack: ${profile.attack}\n` +
-                            `🛡️ Defense: ${profile.defense}\n` +
-                            `💰 Koin: ${coins}\n` +
-                            `📅 Dibuat: ${new Date(profile.created).toLocaleDateString('id-ID')}\n\n` +
-                            '📦 Inventory:\n' +
-                            (inventory.length > 0 ? inventory.map(i => `- ${i}`).join('\n') : 'Kosong') +
-                            '\n\n━━━━━━━━━━━━━━━━━━━━\n' +
-                            '💡 Gunakan .daily untuk klaim hadiah harian!';
-                        
-                        await sock.sendMessage(sender, { text: profileText });
-                        continue;
-                    }
-                    
-                    // DAILY
-                    if (command === '.daily') {
-                        const cooldown = checkCooldown(userId, 'daily');
-                        
-                        if (cooldown.onCooldown) {
-                            await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa klaim daily lagi dalam:\n${formatTime(cooldown.remaining)}` 
-                            });
-                            continue;
-                        }
-                        
-                        const profile = getRPGProfile(userId);
-                        const coinsEarned = 500 + profile.level * 50;
-                        addCoins(userId, coinsEarned);
-                        
-                        await sock.sendMessage(sender, { 
-                            text: `🎁 *DAILY REWARD!*\n\n💰 +${coinsEarned} koin\n\n━━━━━━━━━━━━━━━━━━━━\nKembali besok untuk hadiah lebih besar!\n💰 Total koin: ${getCoins(userId)}` 
-                        });
-                        continue;
-                    }
-                    
-                    // WORK
-                    if (command === '.work') {
-                        const cooldown = checkCooldown(userId, 'work');
-                        
-                        if (cooldown.onCooldown) {
-                            await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa kerja lagi dalam:\n${formatTime(cooldown.remaining)}` 
-                            });
-                            continue;
-                        }
-                        
-                        const jobs = [
-                            { name: "👨‍💻 Programmer", min: 100, max: 300 },
-                            { name: "👷 Buruh", min: 50, max: 150 },
-                            { name: "👨‍🍳 Koki", min: 80, max: 200 },
-                            { name: "👨‍🏫 Guru", min: 120, max: 250 },
-                            { name: "👨‍🔧 Teknisi", min: 90, max: 180 }
+                    // TRUTH
+                    if (command === '.truth') {
+                        const truths = [
+                            "Apa rahasia terbesar yang kamu sembunyikan dari keluarga?",
+                            "Kapan terakhir kali kamu menangis dan mengapa?",
+                            "Apa hal paling memalukan yang pernah terjadi padamu?",
+                            "Siapa orang yang pernah kamu sakiti dan belum kamu minta maaf?",
+                            "Apa kebohongan terbesar yang pernah kamu katakan?",
+                            "Apa hal yang paling kamu takuti dalam hidup?"
                         ];
                         
-                        const job = jobs[Math.floor(Math.random() * jobs.length)];
-                        const coinsEarned = getRandomInt(job.min, job.max);
-                        addCoins(userId, coinsEarned);
+                        const randomTruth = truths[Math.floor(Math.random() * truths.length)];
                         
                         await sock.sendMessage(sender, { 
-                            text: `💼 *BEKERJA*\n\nPekerjaan: ${job.name}\n💰 +${coinsEarned} koin\n💰 Total: ${getCoins(userId)}\n\n━━━━━━━━━━━━━━━━━━━━\nKembali bekerja dalam 5 menit!` 
+                            text: `🤫 *TRUTH*\n\n${randomTruth}\n\n━━━━━━━━━━━━━━━━━━━━\n💬 Jawab dengan jujur!` 
                         });
                         continue;
                     }
                     
-                    // HUNT
-                    if (command === '.hunt') {
-                        const cooldown = checkCooldown(userId, 'hunt');
-                        
-                        if (cooldown.onCooldown) {
-                            await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa berburu lagi dalam:\n${formatTime(cooldown.remaining)}` 
-                            });
-                            continue;
-                        }
-                        
-                        const hunts = [
-                            { item: "🐰 Kelinci", coins: 50, exp: 10 },
-                            { item: "🦌 Rusa", coins: 100, exp: 20 },
-                            { item: "🐗 Babi Hutan", coins: 150, exp: 30 },
-                            { item: "🐻 Beruang", coins: 200, exp: 40 },
-                            { item: "🐉 Naga Kecil", coins: 500, exp: 100 }
+                    // DARE
+                    if (command === '.dare') {
+                        const dares = [
+                            "Kirim suara kamu menyanyi lagu anak-anak!",
+                            "Ganti foto profil WA selama 1 jam!",
+                            "Telepon kontak terakhir di HP kamu selama 30 detik!",
+                            "Kirim screenshot history pencarian terakhir kamu!",
+                            "Unggah story WA dengan filter paling jelek!",
+                            "Kirim pesan 'Aku sayang kamu' ke kontak ke-5 di HP!"
                         ];
                         
-                        const hunt = hunts[Math.floor(Math.random() * hunts.length)];
-                        const coinsEarned = hunt.coins;
-                        const expEarned = hunt.exp;
-                        
-                        addCoins(userId, coinsEarned);
-                        const leveledUp = addExp(userId, expEarned);
-                        
-                        let levelUpText = '';
-                        if (leveledUp) {
-                            const profile = getRPGProfile(userId);
-                            levelUpText = `\n🎉 *LEVEL UP!* Sekarang level ${profile.level}`;
-                        }
+                        const randomDare = dares[Math.floor(Math.random() * dares.length)];
                         
                         await sock.sendMessage(sender, { 
-                            text: `🏹 *BERBURU*\n\nKamu berhasil menangkap: ${hunt.item}\n💰 +${coinsEarned} koin\n⭐ +${expEarned} EXP\n💰 Total: ${getCoins(userId)}${levelUpText}\n\n━━━━━━━━━━━━━━━━━━━━\nKembali berburu dalam 10 menit!` 
+                            text: `😈 *DARE*\n\n${randomDare}\n\n━━━━━━━━━━━━━━━━━━━━\n⚡ Lakukan dalam 5 menit!` 
                         });
                         continue;
                     }
                     
-                    // SHOP
-                    if (command === '.shop') {
-                        try {
-                            const items = await getGameData('rpg_items');
-                            
-                            const shopText = 
-                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                                '┃ 🛒 *TOKO ITEM* 🛒 ┃\n' +
-                                '┃   (API Powered)    ┃\n' +
-                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                                '💰 Koin kamu: ' + getCoins(userId) + '\n\n' +
-                                'Gunakan: .beli [nomor]\n\n' +
-                                items.map(item => 
-                                    `${item.id}. ${item.name} - 💰 ${item.price} koin`
-                                ).join('\n') +
-                                '\n\n━━━━━━━━━━━━━━━━━━━━\n' +
-                                '💡 Contoh: .beli 1';
-                            
-                            await sock.sendMessage(sender, { text: shopText });
-                        } catch (error) {
-                            console.error('Error getting shop items:', error);
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Gagal memuat toko. Coba lagi nanti!' 
-                            });
-                        }
-                        continue;
-                    }
+                    // ==================== GROUP MANAGEMENT ====================
                     
-                    // BELI ITEM
-                    if (command === '.beli' && args[0]) {
-                        try {
-                            const itemId = parseInt(args[0]);
-                            const items = await getGameData('rpg_items');
-                            const item = items.find(i => i.id === itemId);
-                            
-                            if (!item) {
-                                await sock.sendMessage(sender, { 
-                                    text: '❌ Item tidak ditemukan!' 
-                                });
-                                continue;
-                            }
-                            
-                            const coins = getCoins(userId);
-                            
-                            if (coins < item.price) {
-                                await sock.sendMessage(sender, { 
-                                    text: `❌ Koin tidak cukup!\n\nKoin kamu: ${coins}\nHarga: ${item.price}` 
-                                });
-                                continue;
-                            }
-                            
-                            deductCoins(userId, item.price);
-                            addToInventory(userId, item.name);
-                            
-                            await sock.sendMessage(sender, { 
-                                text: `✅ *PEMBELIAN BERHASIL!*\n\nItem: ${item.name}\n💰 -${item.price} koin\n💰 Sisa: ${getCoins(userId)}\n\n📦 Item telah ditambahkan ke inventory!` 
-                            });
-                        } catch (error) {
-                            console.error('Error buying item:', error);
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Gagal membeli item. Coba lagi nanti!' 
-                            });
-                        }
-                        continue;
-                    }
-                    
-                    // INVENTORY
-                    if (command === '.inventory' || command === '.inv') {
-                        const inventory = getInventory(userId);
-                        
-                        const invText = 
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 📦 *INVENTORY* 📦 ┃\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            `💰 Koin: ${getCoins(userId)}\n` +
-                            `📊 Total item: ${inventory.length}\n\n` +
-                            (inventory.length > 0 ? 
-                                inventory.map((item, idx) => `${idx + 1}. ${item}`).join('\n') : 
-                                'Inventory kosong') +
-                            '\n\n━━━━━━━━━━━━━━━━━━━━\n' +
-                            '💡 Kunjungi .shop untuk beli item!';
-                        
-                        await sock.sendMessage(sender, { text: invText });
-                        continue;
-                    }
-                    
-                    // ==================== SPIN/GACHA ====================
-                    if (command === '.spin' || command === '.gacha') {
-                        const cooldown = checkCooldown(userId, 'spin');
-                        
-                        if (cooldown.onCooldown) {
-                            await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa spin lagi dalam:\n${formatTime(cooldown.remaining)}` 
-                            });
+                    // HIDETAG
+                    if (command === '.hidetag' || command === '.ht') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
                             continue;
                         }
                         
-                        const spinCost = 100;
-                        const coins = getCoins(userId);
-                        
-                        if (coins < spinCost) {
-                            await sock.sendMessage(sender, { 
-                                text: `❌ Koin tidak cukup!\n\nKoin kamu: ${coins}\nBiaya spin: ${spinCost}` 
-                            });
-                            continue;
-                        }
-                        
-                        deductCoins(userId, spinCost);
-                        
-                        // Animated spin effect
-                        await sock.sendMessage(sender, { text: '🎰 *SPINNING...*' });
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                        
                         try {
-                            const items = await getGameData('gacha_items');
-                            const weights = {
-                                'common': 40,
-                                'rare': 30,
-                                'epic': 20,
-                                'legendary': 10
-                            };
+                            const groupMetadata = await sock.groupMetadata(sender);
+                            const participants = groupMetadata.participants;
+                            const mentions = participants.map(p => p.id);
                             
-                            const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
-                            let random = Math.random() * totalWeight;
-                            let selectedRarity = '';
+                            let hidetagMessage = '';
+                            let hasMedia = false;
+                            let mediaBuffer = null;
+                            let mediaType = null;
                             
-                            for (const [rarity, weight] of Object.entries(weights)) {
-                                random -= weight;
-                                if (random <= 0) {
-                                    selectedRarity = rarity;
-                                    break;
+                            if (msg.extendedTextMessage?.contextInfo?.quotedMessage) {
+                                const quotedMsg = msg.extendedTextMessage.contextInfo.quotedMessage;
+                                
+                                if (quotedMsg.imageMessage) {
+                                    mediaBuffer = await downloadMediaMessage(quotedMsg.imageMessage, 'image');
+                                    mediaType = 'image';
+                                    hasMedia = true;
+                                } else if (quotedMsg.videoMessage) {
+                                    mediaBuffer = await downloadMediaMessage(quotedMsg.videoMessage, 'video');
+                                    mediaType = 'video';
+                                    hasMedia = true;
                                 }
-                            }
-                            
-                            const rareItems = items.filter(item => item.rarity === selectedRarity);
-                            const wonItem = rareItems[Math.floor(Math.random() * rareItems.length)];
-                            
-                            let rewardText = '';
-                            if (wonItem.value) {
-                                addCoins(userId, wonItem.value);
-                                rewardText = `💰 +${wonItem.value} koin`;
+                                
+                                const quotedText = quotedMsg.conversation || 
+                                                 (quotedMsg.extendedTextMessage?.text) || 
+                                                 (quotedMsg.imageMessage?.caption) || 
+                                                 (quotedMsg.videoMessage?.caption) || '';
+                                
+                                hidetagMessage = `📢 *PENGUMUMAN*\n\n${quotedText}\n\n━━━━━━━━━━━━━━━━\n👥 ${participants.length} members`;
                             } else {
-                                addToInventory(userId, wonItem.name);
-                                rewardText = `📦 ${wonItem.name}`;
+                                const hidetagText = args.join(' ');
+                                
+                                if (!hidetagText) {
+                                    await sock.sendMessage(sender, { 
+                                        text: '┏━━━━━━━━━━━━━━━━┓\n' +
+                                              '┃ 🏷️ *HIDETAG*\n' +
+                                              '┣━━━━━━━━━━━━━━━━┫\n' +
+                                              '┃ .hidetag [text]\n' +
+                                              '┃ Reply + .hidetag\n' +
+                                              '┗━━━━━━━━━━━━━━━━┛'
+                                    });
+                                    continue;
+                                }
+                                
+                                hidetagMessage = `📢 *PENGUMUMAN*\n\n${hidetagText}\n\n━━━━━━━━━━━━━━━━\n👥 ${participants.length} members`;
                             }
                             
-                            const rarityEmoji = {
-                                'common': '⚪',
-                                'rare': '🔵',
-                                'epic': '🟣',
-                                'legendary': '🟡'
-                            };
+                            if (hasMedia && mediaBuffer) {
+                                if (mediaType === 'image') {
+                                    await sock.sendMessage(sender, { 
+                                        image: mediaBuffer, 
+                                        caption: hidetagMessage, 
+                                        mentions 
+                                    });
+                                } else if (mediaType === 'video') {
+                                    await sock.sendMessage(sender, { 
+                                        video: mediaBuffer, 
+                                        caption: hidetagMessage, 
+                                        mentions 
+                                    });
+                                }
+                            } else {
+                                await sock.sendMessage(sender, { 
+                                    text: hidetagMessage, 
+                                    mentions 
+                                });
+                            }
                             
-                            await sock.sendMessage(sender, { 
-                                text: `🎰 *SPIN RESULT!*\n\n` +
-                                      `${rarityEmoji[selectedRarity]} *${selectedRarity.toUpperCase()}* ${rarityEmoji[selectedRarity]}\n\n` +
-                                      `🎁 Hadiah: ${wonItem.name}\n` +
-                                      `${rewardText}\n` +
-                                      `💰 Total koin: ${getCoins(userId)}\n\n` +
-                                      `━━━━━━━━━━━━━━━━━━━━\n` +
-                                      `💡 Spin lagi? .spin` 
-                            });
+                            console.log(`✅ Hidetag sent to ${participants.length} members`);
                         } catch (error) {
-                            console.error('Error spinning:', error);
+                            console.error('❌ Hidetag error:', error.message);
                             await sock.sendMessage(sender, { 
-                                text: '❌ Gagal memutar spin. Coba lagi nanti!' 
+                                text: `❌ Error: ${error.message}` 
                             });
                         }
                         continue;
                     }
                     
-                    // ==================== PET GAME ====================
-                    if (command === '.adopt') {
-                        if (gameStates.petProfiles.has(userId)) {
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Kamu sudah punya pet!\n\nGunakan .pet untuk melihat pet-mu' 
-                            });
+                    // TAGALL
+                    if (command === '.tagall') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
                             continue;
                         }
                         
-                        const adoptCost = 1000;
-                        const coins = getCoins(userId);
-                        
-                        if (coins < adoptCost) {
+                        try {
+                            const groupMetadata = await sock.groupMetadata(sender);
+                            const participants = groupMetadata.participants;
+                            const mentions = participants.map(p => p.id);
+                            
+                            let tagText = '┏━━━━━━━━━━━━━━━━┓\n';
+                            tagText += '┃ 📢 *TAG ALL*\n';
+                            tagText += '┣━━━━━━━━━━━━━━━━┫\n';
+                            
+                            participants.forEach((participant, index) => {
+                                const number = participant.id.split('@')[0];
+                                tagText += `┃ ${index + 1}. @${number}\n`;
+                            });
+                            
+                            tagText += '┗━━━━━━━━━━━━━━━━┛\n\n';
+                            tagText += `👥 Total: ${participants.length}`;
+                            
+                            await sock.sendMessage(sender, { text: tagText, mentions });
+                            console.log(`✅ Tagall sent to ${participants.length} members`);
+                        } catch (error) {
+                            console.error('❌ Tagall error:', error.message);
                             await sock.sendMessage(sender, { 
-                                text: `❌ Koin tidak cukup!\n\nKoin kamu: ${coins}\nBiaya adopt: ${adoptCost}` 
+                                text: `❌ Error: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // KICK
+                    if (command === '.kick') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        try {
+                            const mentionedJid = msg.extendedTextMessage?.contextInfo?.mentionedJid;
+                            
+                            if (!mentionedJid || mentionedJid.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Tag user!\nContoh: .kick @user' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.groupParticipantsUpdate(sender, [mentionedJid[0]], 'remove');
+                            await sock.sendMessage(sender, { 
+                                text: `✅ @${mentionedJid[0].split('@')[0]} di-kick!`, 
+                                mentions: [mentionedJid[0]] 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // ADD
+                    if (command === '.add') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        if (!args[0]) {
+                            await sock.sendMessage(sender, { 
+                                text: '⚠️ Format: .add [nomor]\nContoh: .add 628123456789' 
                             });
                             continue;
                         }
                         
                         try {
-                            const pets = await getGameData('pet_types');
-                            const pet = pets[Math.floor(Math.random() * pets.length)];
+                            let targetNumber = args[0].replace(/[^0-9]/g, '');
+                            if (!targetNumber.startsWith('62')) {
+                                targetNumber = '62' + targetNumber;
+                            }
                             
-                            deductCoins(userId, adoptCost);
-                            
-                            gameStates.petProfiles.set(userId, {
-                                name: pet.name,
-                                type: pet.type,
-                                rarity: pet.rarity,
-                                level: 1,
-                                exp: 0,
-                                happiness: 100,
-                                lastFed: Date.now(),
-                                lastTrained: 0,
-                                adopted: Date.now()
-                            });
-                            
+                            const targetJid = targetNumber + '@s.whatsapp.net';
+                            await sock.groupParticipantsUpdate(sender, [targetJid], 'add');
                             await sock.sendMessage(sender, { 
-                                text: `🐾 *ADOPT SUKSES!*\n\nKamu mengadopsi: ${pet.name}\n⭐ Rarity: ${pet.rarity}\n💰 -${adoptCost} koin\n💰 Sisa: ${getCoins(userId)}\n\n💡 Rawat pet-mu dengan:\n.feed - Kasih makan\n.train - Latih pet\n.pet - Lihat status pet` 
+                                text: `✅ ${targetNumber} ditambahkan!` 
                             });
                         } catch (error) {
-                            console.error('Error adopting pet:', error);
                             await sock.sendMessage(sender, { 
-                                text: '❌ Gagal mengadopsi pet. Coba lagi nanti!' 
+                                text: `❌ Error: ${error.message}` 
                             });
                         }
                         continue;
                     }
                     
-                    if (command === '.pet') {
-                        if (!gameStates.petProfiles.has(userId)) {
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Kamu belum punya pet!\n\nGunakan .adopt untuk mengadopsi pet' 
-                            });
+                    // PROMOTE
+                    if (command === '.promote') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
                             continue;
                         }
                         
-                        const pet = gameStates.petProfiles.get(userId);
-                        const hoursSinceFed = Math.floor((Date.now() - pet.lastFed) / (60 * 60 * 1000));
-                        
-                        if (hoursSinceFed > 24) {
-                            pet.happiness = Math.max(0, pet.happiness - 20);
+                        try {
+                            const mentionedJid = msg.extendedTextMessage?.contextInfo?.mentionedJid;
+                            
+                            if (!mentionedJid || mentionedJid.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Tag user!\nContoh: .promote @user' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.groupParticipantsUpdate(sender, [mentionedJid[0]], 'promote');
+                            await sock.sendMessage(sender, { 
+                                text: `✅ @${mentionedJid[0].split('@')[0]} jadi admin!`, 
+                                mentions: [mentionedJid[0]] 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}` 
+                            });
                         }
-                        
-                        const petText = 
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🐾 *PET PROFILE* 🐾 ┃\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            `Nama: ${pet.name}\n` +
-                            `Tipe: ${pet.type}\n` +
-                            `⭐ Rarity: ${pet.rarity}\n` +
-                            `📊 Level: ${pet.level}\n` +
-                            `📈 EXP: ${pet.exp}/${pet.level * 100}\n` +
-                            `😊 Happiness: ${pet.happiness}/100\n` +
-                            `📅 Diadopsi: ${new Date(pet.adopted).toLocaleDateString('id-ID')}\n\n` +
-                            '━━━━━━━━━━━━━━━━━━━━\n' +
-                            '💡 Perintah:\n' +
-                            '.feed - Kasih makan (+10 happiness)\n' +
-                            '.train - Latih (+20 EXP)\n\n' +
-                            `⏰ Terakhir makan: ${hoursSinceFed} jam lalu`;
-                        
-                        await sock.sendMessage(sender, { text: petText });
                         continue;
                     }
                     
-                    if (command === '.feed') {
-                        if (!gameStates.petProfiles.has(userId)) {
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Kamu belum punya pet!' 
-                            });
+                    // DEMOTE
+                    if (command === '.demote') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
                             continue;
                         }
                         
-                        const pet = gameStates.petProfiles.get(userId);
-                        const feedCost = 10;
-                        const coins = getCoins(userId);
-                        
-                        if (coins < feedCost) {
+                        try {
+                            const mentionedJid = msg.extendedTextMessage?.contextInfo?.mentionedJid;
+                            
+                            if (!mentionedJid || mentionedJid.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Tag user!\nContoh: .demote @user' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.groupParticipantsUpdate(sender, [mentionedJid[0]], 'demote');
                             await sock.sendMessage(sender, { 
-                                text: `❌ Koin tidak cukup!\n\nKoin kamu: ${coins}\nBiaya feed: ${feedCost}` 
+                                text: `✅ @${mentionedJid[0].split('@')[0]} bukan admin!`, 
+                                mentions: [mentionedJid[0]] 
                             });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // LINKGC
+                    if (command === '.linkgc') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
                             continue;
                         }
                         
-                        deductCoins(userId, feedCost);
-                        pet.lastFed = Date.now();
-                        pet.happiness = Math.min(100, pet.happiness + 10);
-                        
-                        await sock.sendMessage(sender, { 
-                            text: `🍗 *FEED PET*\n\n${pet.name} sudah diberi makan!\n😊 Happiness: +10\n💰 -${feedCost} koin\n💰 Sisa: ${getCoins(userId)}\n\n💡 Happiness sekarang: ${pet.happiness}/100` 
-                        });
+                        try {
+                            const code = await sock.groupInviteCode(sender);
+                            await sock.sendMessage(sender, { 
+                                text: `🔗 *LINK GROUP*\n\nhttps://chat.whatsapp.com/${code}` 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { text: '❌ Bot bukan admin!' });
+                        }
                         continue;
                     }
                     
-                    if (command === '.train') {
-                        if (!gameStates.petProfiles.has(userId)) {
-                            await sock.sendMessage(sender, { 
-                                text: '❌ Kamu belum punya pet!' 
-                            });
+                    // REVOKE
+                    if (command === '.revoke') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
                             continue;
                         }
                         
-                        const pet = gameStates.petProfiles.get(userId);
-                        const cooldown = 30 * 60 * 1000; // 30 menit
-                        
-                        if (Date.now() - pet.lastTrained < cooldown) {
-                            const minutesLeft = Math.ceil((cooldown - (Date.now() - pet.lastTrained)) / (60 * 1000));
-                            await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa latih lagi dalam ${minutesLeft} menit` 
-                            });
-                            continue;
+                        try {
+                            await sock.groupRevokeInvite(sender);
+                            await sock.sendMessage(sender, { text: '✅ Link grup direset!' });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { text: '❌ Bot bukan admin!' });
                         }
-                        
-                        pet.lastTrained = Date.now();
-                        pet.exp += 20;
-                        
-                        if (pet.exp >= pet.level * 100) {
-                            pet.level++;
-                            pet.exp = 0;
-                            await sock.sendMessage(sender, { 
-                                text: `🏋️ *TRAIN PET*\n\n${pet.name} berhasil dilatih!\n⭐ EXP: +20\n🎉 *LEVEL UP!* Sekarang level ${pet.level}` 
-                            });
-                        } else {
-                            await sock.sendMessage(sender, { 
-                                text: `🏋️ *TRAIN PET*\n\n${pet.name} berhasil dilatih!\n⭐ EXP: +20\n📈 EXP total: ${pet.exp}/${pet.level * 100}` 
-                            });
-                        }
-                        continue;
-                    }
-                    
-                    // ==================== LEADERBOARD ====================
-                    if (command === '.topglobal') {
-                        const top = getGlobalLeaderboard(10);
-                        
-                        let leaderboardText = '┏━━━━━━━━━━━━━━━━━━━━┓\n';
-                        leaderboardText += '┃ 🏆 *TOP GLOBAL* 🏆 ┃\n';
-                        leaderboardText += '┗━━━━━━━━━━━━━━━━━━━━┛\n\n';
-                        
-                        if (top.length === 0) {
-                            leaderboardText += 'Belum ada data leaderboard\n';
-                        } else {
-                            top.forEach(([userId, points], index) => {
-                                const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-                                leaderboardText += `${medal} @${userId.split('@')[0]} - ${points} poin\n`;
-                            });
-                        }
-                        
-                        leaderboardText += '\n━━━━━━━━━━━━━━━━━━━━\n';
-                        leaderboardText += '💡 Main game untuk naik rank!';
-                        
-                        await sock.sendMessage(sender, { text: leaderboardText });
-                        continue;
-                    }
-                    
-                    if (command === '.topgroup' && isGroup) {
-                        const top = getGroupLeaderboard(sender, 10);
-                        
-                        let leaderboardText = '┏━━━━━━━━━━━━━━━━━━━━┓\n';
-                        leaderboardText += '┃ 🏆 *TOP GROUP* 🏆 ┃\n';
-                        leaderboardText += '┗━━━━━━━━━━━━━━━━━━━━┛\n\n';
-                        
-                        if (top.length === 0) {
-                            leaderboardText += 'Belum ada data leaderboard\n';
-                        } else {
-                            top.forEach(([userId, points], index) => {
-                                const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-                                leaderboardText += `${medal} @${userId.split('@')[0]} - ${points} poin\n`;
-                            });
-                        }
-                        
-                        leaderboardText += '\n━━━━━━━━━━━━━━━━━━━━\n';
-                        leaderboardText += '💡 Main game di grup ini untuk naik rank!';
-                        
-                        await sock.sendMessage(sender, { text: leaderboardText });
-                        continue;
-                    }
-                    
-                    if (command === '.myrank') {
-                        const globalRank = Array.from(gameStates.globalLeaderboard.entries())
-                            .sort((a, b) => b[1] - a[1])
-                            .findIndex(([id]) => id === userId) + 1;
-                        
-                        const coins = getCoins(userId);
-                        
-                        let rankText = '┏━━━━━━━━━━━━━━━━━━━━┓\n';
-                        rankText += '┃ 📊 *MY RANK* 📊 ┃\n';
-                        rankText += '┗━━━━━━━━━━━━━━━━━━━━┛\n\n';
-                        
-                        rankText += `👤 ${pushName}\n`;
-                        rankText += `💰 Koin: ${coins}\n`;
-                        rankText += `🌐 Global Rank: ${globalRank > 0 ? `#${globalRank}` : 'Belum ada rank'}\n`;
-                        
-                        if (isGroup) {
-                            const groupRank = getGroupLeaderboard(sender)
-                                .findIndex(([id]) => id === userId) + 1;
-                            rankText += `👥 Group Rank: ${groupRank > 0 ? `#${groupRank}` : 'Belum ada rank'}\n`;
-                        }
-                        
-                        rankText += '\n━━━━━━━━━━━━━━━━━━━━\n';
-                        rankText += '💡 Main game untuk naik rank!';
-                        
-                        await sock.sendMessage(sender, { text: rankText });
                         continue;
                     }
                     
                     // ==================== TOOLS ====================
+                    
+                    // PING
                     if (command === '.ping') {
                         const start = Date.now();
                         const sent = await sock.sendMessage(sender, { text: '🏓 Pinging...' });
@@ -2819,13 +2530,14 @@ async function startBot() {
                             `┃ ⚡ ${end - start}ms\n` +
                             '┃ 📶 Online\n' +
                             `┃ ⏰ ${formatRuntime(Date.now() - BOT_START_TIME)}\n` +
-                            `┃ 🌐 API: ${GAME_API_BASE}\n` +
+                            `┃ 💾 ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB\n` +
                             '┗━━━━━━━━━━━━━━━━┛';
                         
                         await sock.sendMessage(sender, { text: pingText, edit: sent.key });
                         continue;
                     }
                     
+                    // RUNTIME
                     if (command === '.runtime') {
                         const runtimeText = 
                             '┏━━━━━━━━━━━━━━━━┓\n' +
@@ -2834,15 +2546,212 @@ async function startBot() {
                             `┃ 🤖 ${BOT_NAME}\n` +
                             `┃ ⏱️ ${formatRuntime(Date.now() - BOT_START_TIME)}\n` +
                             `┃ 📅 ${new Date(BOT_START_TIME).toLocaleString('id-ID')}\n` +
-                            `┃ 🎮 Game Mode: Dynamic API\n` +
-                            `┃ 🌐 API: ${GAME_API_BASE}\n` +
-                            `┃ 💰 Coin System: Active\n` +
+                            `┃ 💾 Database: MongoDB\n` +
                             '┗━━━━━━━━━━━━━━━━┛';
                         
                         await sock.sendMessage(sender, { text: runtimeText });
                         continue;
                     }
                     
+                    // SHORTLINK
+                    if (command === '.shortlink' && args[0]) {
+                        try {
+                            await sock.sendMessage(sender, { text: '⏳ Membuat shortlink...' });
+                            
+                            const url = args[0];
+                            if (!url.startsWith('http')) {
+                                throw new Error('URL harus dimulai dengan http:// atau https://');
+                            }
+                            
+                            const shortUrl = await createShortlink(url);
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `🔗 *SHORTLINK*\n\n🌐 Original: ${url}\n🔗 Short: ${shortUrl}\n\n━━━━━━━━━━━━━━━━━━━━\n📋 Copy link di atas` 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== FUN ====================
+                    
+                    // QUOTES
+                    if (command === '.quotes') {
+                        const quotes = [
+                            "Hidup itu seperti coding, kadang ada bug tapi harus tetap di-debug! 💻",
+                            "Jangan menyerah, karena setiap error adalah pelajaran baru! 🚀",
+                            "Coding bukan tentang sempurna, tapi tentang terus belajar! ✨",
+                            "Programmer yang baik adalah programmer yang bisa baca dokumentasi! 📚",
+                            "Jika kode tidak berjalan, coba restart dan berdoa! 🙏"
+                        ];
+                        
+                        const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+                        await sock.sendMessage(sender, { 
+                            text: `💬 *QUOTES*\n\n${randomQuote}\n\n━━━━━━━━━━━━━━━━━━━━\n✨ Inspirasi hari ini` 
+                        });
+                        continue;
+                    }
+                    
+                    // PANTUN
+                    if (command === '.pantun') {
+                        const pantuns = [
+                            "Pergi ke pasar beli semangka\nJangan lupa beli pepaya\nRajin-rajinlah belajar koding\nAgar jadi programmer hebat!",
+                            "Minum es di siang hari\nSegar sekali di tenggorokan\nBuat kode jangan asal copy\nHarus paham dan mengerti!",
+                            "Jalan-jalan ke kota Malang\nLihat gunung yang tinggi menjulang\nKoding memang butuh kesabaran\nHasilnya pasti memuaskan!"
+                        ];
+                        
+                        const randomPantun = pantuns[Math.floor(Math.random() * pantuns.length)];
+                        await sock.sendMessage(sender, { 
+                            text: `📜 *PANTUN*\n\n${randomPantun}\n\n━━━━━━━━━━━━━━━━━━━━\n🎭 Pantun tradisional` 
+                        });
+                        continue;
+                    }
+                    
+                    // RATE
+                    if (command === '.rate' && args.length > 0) {
+                        const item = args.join(' ');
+                        const rating = Math.floor(Math.random() * 101);
+                        let emoji = '⭐';
+                        
+                        if (rating >= 80) emoji = '🌟🌟🌟🌟🌟';
+                        else if (rating >= 60) emoji = '🌟🌟🌟🌟';
+                        else if (rating >= 40) emoji = '🌟🌟🌟';
+                        else if (rating >= 20) emoji = '🌟🌟';
+                        else emoji = '⭐';
+                        
+                        await sock.sendMessage(sender, { 
+                            text: `📊 *RATING*\n\n🎯 Item: ${item}\n⭐ Rating: ${rating}/100\n${emoji}\n\n━━━━━━━━━━━━━━━━━━━━\n💡 Penilaian acak bot` 
+                        });
+                        continue;
+                    }
+                    
+                    // JODOH
+                    if (command === '.jodoh') {
+                        const name = args[0] || pushName;
+                        const compatibility = Math.floor(Math.random() * 101);
+                        const statuses = [
+                            'Sangat Cocok! 💖',
+                            'Cocok 👍',
+                            'Cukup Cocok 😊',
+                            'Kurang Cocok 😐',
+                            'Tidak Cocok ❌'
+                        ];
+                        
+                        let statusIndex = 0;
+                        if (compatibility >= 80) statusIndex = 0;
+                        else if (compatibility >= 60) statusIndex = 1;
+                        else if (compatibility >= 40) statusIndex = 2;
+                        else if (compatibility >= 20) statusIndex = 3;
+                        else statusIndex = 4;
+                        
+                        await sock.sendMessage(sender, { 
+                            text: `💑 *CEK JODOH*\n\n👤 Nama: ${name}\n💝 Kecocokan: ${compatibility}%\n📊 Status: ${statuses[statusIndex]}\n\n━━━━━━━━━━━━━━━━━━━━\n🎲 Hasil acak, hanya untuk hiburan!` 
+                        });
+                        continue;
+                    }
+                    
+                    // ==================== IMAGE/STICKER ====================
+                    
+                    // STICKER
+                    if (command === '.s' || command === '.sticker') {
+                        let mediaMessage = null;
+                        let mediaType = null;
+                        let isVideo = false;
+                        
+                        if (msg.extendedTextMessage?.contextInfo?.quotedMessage) {
+                            const quoted = msg.extendedTextMessage.contextInfo.quotedMessage;
+                            
+                            if (quoted.imageMessage) {
+                                mediaMessage = quoted.imageMessage;
+                                mediaType = 'image';
+                            } else if (quoted.videoMessage) {
+                                mediaMessage = quoted.videoMessage;
+                                mediaType = 'video';
+                                isVideo = true;
+                            }
+                        } else if (msg.imageMessage) {
+                            mediaMessage = msg.imageMessage;
+                            mediaType = 'image';
+                        } else if (msg.videoMessage) {
+                            mediaMessage = msg.videoMessage;
+                            mediaType = 'video';
+                            isVideo = true;
+                        }
+                        
+                        if (!mediaMessage) {
+                            await sock.sendMessage(sender, { 
+                                text: '⚠️ Reply gambar/video dengan caption .s' 
+                            });
+                            continue;
+                        }
+                        
+                        try {
+                            await sock.sendMessage(sender, { text: '⏳ Membuat sticker...' });
+                            const buffer = await downloadMediaMessage(mediaMessage, mediaType);
+                            const stickerBuffer = await createSticker(buffer, isVideo);
+                            await sock.sendMessage(sender, { sticker: stickerBuffer });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // TOIMG (Convert sticker to image)
+                    if (command === '.toimg') {
+                        try {
+                            if (msg.extendedTextMessage?.contextInfo?.quotedMessage?.stickerMessage) {
+                                const stickerMsg = msg.extendedTextMessage.contextInfo.quotedMessage.stickerMessage;
+                                
+                                await sock.sendMessage(sender, { text: '⏳ Mengkonversi sticker ke gambar...' });
+                                
+                                const buffer = await downloadMediaMessage(stickerMsg, 'sticker');
+                                const imageBuffer = await convertStickerToImage(buffer);
+                                
+                                await sock.sendMessage(sender, {
+                                    image: imageBuffer,
+                                    caption: '🔄 Sticker converted to image'
+                                });
+                            } else {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Reply sticker dengan caption .toimg' 
+                                });
+                            }
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // AUTO STICKER (skip for view once)
+                    const hasImage = msg.imageMessage;
+                    const hasVideo = msg.videoMessage;
+                    const isViewOnceMsg = m.key.isViewOnce;
+                    
+                    if ((hasImage || hasVideo) && !text.toLowerCase().includes('nosticker') && !isViewOnceMsg) {
+                        try {
+                            const mediaMessage = hasImage ? msg.imageMessage : msg.videoMessage;
+                            const mediaType = hasImage ? 'image' : 'video';
+                            const isVideo = hasVideo;
+                            
+                            const buffer = await downloadMediaMessage(mediaMessage, mediaType);
+                            const stickerBuffer = await createSticker(buffer, isVideo);
+                            await sock.sendMessage(sender, { sticker: stickerBuffer });
+                        } catch (error) {
+                            console.error('Auto-sticker:', error.message);
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== OWNER COMMANDS ====================
+                    
+                    // OWNER
                     if (command === '.owner') {
                         const vcard = 
                             'BEGIN:VCARD\n' +
@@ -2858,6 +2767,82 @@ async function startBot() {
                             }
                         });
                         continue;
+                    }
+                    
+                    // BAN
+                    if (command === '.ban' && isOwner) {
+                        if (msg.extendedTextMessage?.contextInfo?.mentionedJid) {
+                            const target = msg.extendedTextMessage.contextInfo.mentionedJid[0];
+                            bannedUsers.add(target);
+                            await sock.sendMessage(sender, { 
+                                text: `⛔ @${target.split('@')[0]} telah di-BAN!`, 
+                                mentions: [target] 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // UNBAN
+                    if (command === '.unban' && isOwner) {
+                        if (msg.extendedTextMessage?.contextInfo?.mentionedJid) {
+                            const target = msg.extendedTextMessage.contextInfo.mentionedJid[0];
+                            bannedUsers.delete(target);
+                            await sock.sendMessage(sender, { 
+                                text: `✅ @${target.split('@')[0]} telah di-UNBAN!`, 
+                                mentions: [target] 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // VIEWONCE LIST
+                    if ((command === '.viewonce' || command === '.savedmedia') && isOwner) {
+                        const savedCount = Array.from(viewOnceMessages.values()).length;
+                        const fileCount = fs.existsSync(VIEWONCE_SAVE_FOLDER) ? 
+                            fs.readdirSync(VIEWONCE_SAVE_FOLDER).filter(f => f.startsWith('viewonce_')).length : 0;
+                        
+                        const listText = 
+                            `🚨 *VIEW ONCE SAVED MEDIA*\n\n` +
+                            `📊 Stats:\n` +
+                            `├ Total Saved: ${savedCount}\n` +
+                            `├ Files in Folder: ${fileCount}\n` +
+                            `└ Folder: ${VIEWONCE_SAVE_FOLDER}\n\n` +
+                            `🌐 Web Access:\n` +
+                            `├ List: http://localhost:${PORT}/viewonce\n` +
+                            `└ Health: http://localhost:${PORT}/health\n\n` +
+                            `💡 Semua media view once telah disimpan secara otomatis.`;
+                        
+                        await sock.sendMessage(sender, { text: listText });
+                        continue;
+                    }
+                    
+                    // ==================== AI CHAT ====================
+                    
+                    // AI Chat (only if no command and has text)
+                    if (text && !m.key.fromMe && groq && !hasImage && !hasVideo && !text.startsWith('.') && text.length > 3) {
+                        try {
+                            await sock.sendPresenceUpdate('composing', sender);
+                            
+                            const completion = await groq.chat.completions.create({
+                                messages: [
+                                    { 
+                                        role: 'system', 
+                                        content: `Kamu adalah ${BOT_NAME}, asisten WhatsApp yang ramah dan helpful. Jawablah dalam bahasa Indonesia yang santai dan mudah dimengerti. Gunakan emoji yang sesuai.` 
+                                    },
+                                    { role: 'user', content: text }
+                                ],
+                                model: 'llama-3.3-70b-versatile',
+                                max_tokens: 500,
+                                temperature: 0.7
+                            });
+                            
+                            const response = completion.choices[0].message.content;
+                            if (response) {
+                                await sock.sendMessage(sender, { text: response });
+                            }
+                        } catch (e) {
+                            console.error('AI chat error:', e.message);
+                        }
                     }
                     
                 } catch (err) {
@@ -2876,10 +2861,13 @@ async function startBot() {
 // Error handling
 process.on('uncaughtException', (err) => {
     console.error('💥 Uncaught Exception:', err.message);
+    console.error(err.stack);
 });
 
 process.on('unhandledRejection', (err) => {
     console.error('💥 Unhandled Rejection:', err.message);
 });
+
+// test update github
 
 startBot();
