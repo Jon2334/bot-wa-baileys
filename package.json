@@ -1,11 +1,14 @@
 {
-  "name": "baileys-groq-bot",
-  "version": "1.0.0",
-  "description": "WhatsApp Bot with Groq AI",
+  "name": "whatsapp-bot-dynamic-games",
+  "version": "3.0.0",
+  "description": "WhatsApp Bot with Dynamic Games from API",
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "api": "node game-api-server.js",
+    "dev": "nodemon index.js",
+    "dev-api": "nodemon game-api-server.js"
   },
   "engines": {
     "node": "20.x"
@@ -14,21 +17,23 @@
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "@hapi/boom": "^10.0.1",
     "express": "^4.19.2",
-    "fluent-ffmpeg": "^2.1.2",
-    "groq-sdk": "^0.37.0",
     "node-cache": "^5.1.2",
     "pino": "^8.20.0",
-    "pino-pretty": "^11.0.0",
     "qrcode-terminal": "^0.12.0",
     "sharp": "^0.32.6",
     "axios": "^1.7.9",
-    "qrcode": "^1.5.3",
-    "jsqr": "^1.4.0",
     "mongodb": "^6.3.0",
-"mongoose": "^8.0.3",
-    "pngjs": "^7.0.0"
+    "cors": "^2.8.5",
+    "nodemon": "^3.0.3"
   },
-  "keywords": [],
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "games",
+    "api",
+    "dynamic",
+    "baileys"
+  ],
   "author": "",
   "license": "ISC"
 }

@@ -1,4 +1,4 @@
-// index.js - VERSION WITH ALL GAMES
+// index.js - VERSION WITH DYNAMIC GAMES FROM WEB API
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
@@ -37,9 +37,13 @@ const msgRetryCounterCache = new NodeCache();
 
 // Konfigurasi
 const PORT = process.env.PORT || 3000;
-const BOT_NAME = 'Jonkris-Bot';
-const OWNER_NUMBER = '6289509158681';
-const OWNER_JID = '103066632216677@lid';
+const BOT_NAME = process.env.BOT_NAME || 'Jonkris-Bot';
+const OWNER_NUMBER = process.env.OWNER_NUMBER || '6289509158681';
+const OWNER_JID = process.env.OWNER_JID || '103066632216677@lid';
+
+// 🔥 GAME API CONFIGURATION
+const GAME_API_BASE = process.env.GAME_API_BASE || 'https://game-api.botcreator.id/api';
+const GAME_API_KEY = process.env.GAME_API_KEY || 'demo_key_2024';
 
 const BOT_START_TIME = Date.now();
 
@@ -101,188 +105,32 @@ const gameStates = {
     // Pet Game
     petProfiles: new Map(),
     
+    // Werewolf Game
+    werewolfGames: new Map(),
+    
     // Leaderboards
     globalLeaderboard: new Map(),
     groupLeaderboard: new Map(),
     
     // Coins System
-    userCoins: new Map()
-};
+    userCoins: new Map(),
 
-// Game Data
-const gameData = {
-    // Tebak Kata words
-    kataWords: [
-        { kata: "KOMPUTER", acak: "KOMPUTER", hint: "Alat elektronik untuk mengolah data" },
-        { kata: "SMARTPHONE", acak: "SMARTPHONE", hint: "Telepon pintar" },
-        { kata: "INDONESIA", acak: "INDONESIA", hint: "Negara kepulauan di Asia Tenggara" },
-        { kata: "PROGRAMMER", acak: "PROGRAMMER", hint: "Pembuat aplikasi" },
-        { kata: "INTERNET", acak: "INTERNET", hint: "Jaringan komputer global" },
-        { kata: "TEKNOLOGI", acak: "TEKNOLOGI", hint: "Ilmu terapan" },
-        { kata: "EDUCATION", acak: "EDUCATION", hint: "Pendidikan (bahasa Inggris)" },
-        { kata: "SOFTWARE", acak: "SOFTWARE", hint: "Perangkat lunak" },
-        { kata: "HARDWARE", acak: "HARDWARE", hint: "Perangkat keras" },
-        { kata: "DATABASE", acak: "DATABASE", hint: "Basis data" }
-    ],
-    
-    // Tebak Gambar (random images URLs)
-    gambarData: [
-        { url: "https://i.imgur.com/3A6Y7aB.jpeg", answer: "kucing", hint: "Hewan peliharaan" },
-        { url: "https://i.imgur.com/5L8Y6Za.jpeg", answer: "mobil", hint: "Kendaraan roda empat" },
-        { url: "https://i.imgur.com/7N9Y8Xb.jpeg", answer: "pohon", hint: "Tumbuhan besar" },
-        { url: "https://i.imgur.com/2B3C4D5.jpeg", answer: "laptop", hint: "Komputer portabel" },
-        { url: "https://i.imgur.com/9A0B1C2.jpeg", answer: "buku", hint: "Sumber ilmu" }
-    ],
-    
-    // Quiz Questions
-    quizQuestions: [
-        {
-            question: "Ibukota Indonesia adalah?",
-            options: ["A. Jakarta", "B. Bandung", "C. Surabaya", "D. Medan"],
-            answer: "A",
-            point: 10
-        },
-        {
-            question: "Planet terdekat dengan matahari?",
-            options: ["A. Venus", "B. Merkurius", "C. Bumi", "D. Mars"],
-            answer: "B",
-            point: 15
-        },
-        {
-            question: "2 + 2 x 2 = ?",
-            options: ["A. 6", "B. 8", "C. 4", "D. 10"],
-            answer: "A",
-            point: 10
-        },
-        {
-            question: "Warna bendera Indonesia?",
-            options: ["A. Merah Putih", "B. Hijau Putih", "C. Merah Kuning", "D. Biru Putih"],
-            answer: "A",
-            point: 5
-        },
-        {
-            question: "Hewan tercepat di dunia?",
-            options: ["A. Singa", "B. Cheetah", "C. Elang", "D. Ikan Marlin"],
-            answer: "B",
-            point: 15
-        }
-    ],
-    
-    // Truth Questions
-    truthQuestions: [
-        "Apa rahasia terbesar yang kamu sembunyikan dari teman-teman?",
-        "Kapan terakhir kali kamu menangis dan mengapa?",
-        "Siapa orang yang paling kamu kagumi?",
-        "Apa kebohongan terbesar yang pernah kamu katakan?",
-        "Apa ketakutan terbesarmu?",
-        "Jika kamu bisa bertukar hidup dengan seseorang selama sehari, siapa itu?",
-        "Apa hal paling memalukan yang pernah terjadi padamu?",
-        "Apa impian terbesarmu yang belum tercapai?"
-    ],
-    
-    // Dare Challenges
-    dareChallenges: [
-        "Kirim suara kamu menyanyi lagu populer!",
-        "Ganti foto profil WA selama 1 jam!",
-        "Telepon teman terdekat dan bilang 'Aku sayang kamu'!",
-        "Posting story dengan filter paling aneh!",
-        "Kirim pesan 'Halo sayang' ke kontak ke-5 di HP!",
-        "Rekam video sedang menari selama 15 detik!",
-        "Kirim screenshot gallery terbaru ke grup!",
-        "Ucapkan alfabet terbalik dengan suara!"
-    ],
-    
-    // Tebak Lagu (song snippets info)
-    songs: [
-        { title: "Smooth Criminal", artist: "Michael Jackson", hint: "Lagu tentang kejahatan" },
-        { title: "Bohemian Rhapsody", artist: "Queen", hint: "Lagu rock opera" },
-        { title: "Shape of You", artist: "Ed Sheeran", hint: "Lagu pop tentang tubuh" },
-        { title: "Dynamite", artist: "BTS", hint: "Lagu K-pop energik" },
-        { title: "Bad Guy", artist: "Billie Eilish", hint: "Lagu dengan bass kuat" }
-    ],
-    
-    // Bendera negara
-    bendera: [
-        { country: "Indonesia", emoji: "🇮🇩", clue: "Merah Putih" },
-        { country: "Malaysia", emoji: "🇲🇾", clue: "Jalur Gemilang" },
-        { country: "Singapore", emoji: "🇸🇬", clue: "Bulan sabit dan bintang" },
-        { country: "Japan", emoji: "🇯🇵", clue: "Matahari terbit" },
-        { country: "USA", emoji: "🇺🇸", clue: "Stars and Stripes" },
-        { country: "UK", emoji: "🇬🇧", clue: "Union Jack" },
-        { country: "France", emoji: "🇫🇷", clue: "Tricolore" },
-        { country: "Germany", emoji: "🇩🇪", clue: "Hitam, Merah, Emas" },
-        { country: "Brazil", emoji: "🇧🇷", clue: "Hijau dan Kuning" },
-        { country: "Australia", emoji: "🇦🇺", clue: "Bintang dan Union Jack" }
-    ],
-    
-    // Emoji tebak
-    emojiPuzzles: [
-        { emoji: "🍜🔥", answer: "mie pedas", hint: "Makanan pedas" },
-        { emoji: "✈️🌍", answer: "perjalanan dunia", hint: "Terbang mengelilingi" },
-        { emoji: "💻☕", answer: "ngoding sambil ngopi", hint: "Aktivitas programmer" },
-        { emoji: "🌧️☔", answer: "hujan turun", hint: "Cuaca basah" },
-        { emoji: "🎓💼", answer: "wisuda kerja", hint: "Lulus dan bekerja" },
-        { emoji: "❤️💔", answer: "cinta patah", hint: "Hubungan putus" },
-        { emoji: "🍕🎉", answer: "pesta pizza", hint: "Pesta dengan makanan" },
-        { emoji: "🎮🏆", answer: "juara game", hint: "Menang kompetisi" }
-    ],
-    
-    // Lirik lagu
-    lirikLagu: [
-        { line: "Kisah klasik untuk dunia", next: "Yang selalu terngiang di telinga" },
-        { line: "Andai aku bisa terbang", next: "Aku kan datang bawa angin" },
-        { line: "Menatap mentari pagi", next: "Menyinari hari yang baru" },
-        { line: "Dalam diam aku berharap", next: "Semoga kau mengerti rasa" },
-        { line: "Jalan ini panjang sekali", next: "Tapi aku takkan berhenti" }
-    ],
-    
-    // Items untuk RPG
-    shopItems: [
-        { id: 1, name: "⚔️ Pedang Besi", price: 100, type: "weapon", power: 10 },
-        { id: 2, name: "🛡️ Perisai Kayu", price: 80, type: "armor", defense: 8 },
-        { id: 3, name: "❤️ Potion Kecil", price: 30, type: "potion", heal: 50 },
-        { id: 4, name: "❤️ Potion Besar", price: 60, type: "potion", heal: 100 },
-        { id: 5, name: "🍗 Ayam Goreng", price: 20, type: "food", stamina: 20 },
-        { id: 6, name: "💎 Batu Ajaib", price: 200, type: "special", luck: 5 }
-    ],
-    
-    // Gacha items
-    gachaItems: [
-        { name: "🪙 100 Koin", rarity: "common", value: 100 },
-        { name: "🪙 500 Koin", rarity: "rare", value: 500 },
-        { name: "💎 Batu Langka", rarity: "epic", value: 1000 },
-        { name: "👑 Mahkota Emas", rarity: "legendary", value: 5000 },
-        { name: "❤️ Potion Langka", rarity: "rare", value: 300 },
-        { name: "🗡️ Pedang Legenda", rarity: "legendary", value: 3000 },
-        { name: "🛡️ Perisai Suci", rarity: "epic", value: 1500 },
-        { name: "📜 Gulungan Ajaib", rarity: "epic", value: 1200 }
-    ],
-    
-    // Pet types
-    petTypes: [
-        { name: "🐉 Naga Kecil", type: "dragon", rarity: "legendary" },
-        { name: "🐱 Kucing Ajaib", type: "cat", rarity: "common" },
-        { name: "🐕 Anjing Setia", type: "dog", rarity: "common" },
-        { name: "🦅 Elang Perkasa", type: "eagle", rarity: "rare" },
-        { name: "🦊 Rubah Cerdik", type: "fox", rarity: "rare" },
-        { name: "🐼 Panda Lucu", type: "panda", rarity: "epic" },
-        { name: "🦁 Singa Muda", type: "lion", rarity: "epic" },
-        { name: "🦄 Unicorn", type: "unicorn", rarity: "legendary" }
-    ]
+    // Game Data Cache
+    gameDataCache: new Map(),
+    cacheTimestamp: new Map()
 };
 
 // Utility Functions
-function scrambleWord(word) {
-    const letters = word.split('');
-    for (let i = letters.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [letters[i], letters[j]] = [letters[j], letters[i]];
-    }
-    return letters.join('');
-}
-
 function getRandomInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
+function shuffleArray(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+    }
+    return array;
 }
 
 function getGreeting() {
@@ -326,6 +174,299 @@ function formatRuntime(ms) {
     return result.trim() || '0s';
 }
 
+function scrambleWord(word) {
+    const letters = word.split('');
+    for (let i = letters.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [letters[i], letters[j]] = [letters[j], letters[i]];
+    }
+    return letters.join('');
+}
+
+// 🔥 GAME API FUNCTIONS - SEMUA GAME DIAMBIL DARI API
+async function fetchFromGameAPI(endpoint, params = {}) {
+    try {
+        const url = `${GAME_API_BASE}/${endpoint}`;
+        const response = await axios.get(url, {
+            params: {
+                api_key: GAME_API_KEY,
+                bot_name: BOT_NAME,
+                ...params
+            },
+            timeout: 10000
+        });
+        
+        return response.data;
+    } catch (error) {
+        console.error(`❌ API Error (${endpoint}):`, error.message);
+        return getFallbackData(endpoint);
+    }
+}
+
+async function getGameData(gameType, options = {}) {
+    const cacheKey = `${gameType}_${JSON.stringify(options)}`;
+    const now = Date.now();
+    
+    // Check cache (5 minutes)
+    if (gameStates.gameDataCache.has(cacheKey)) {
+        const cached = gameStates.gameDataCache.get(cacheKey);
+        if (now - cached.timestamp < 5 * 60 * 1000) {
+            return cached.data;
+        }
+    }
+    
+    try {
+        let data;
+        
+        switch(gameType) {
+            case 'tebakkata':
+                data = await fetchFromGameAPI('games/tebak-kata', options);
+                if (!data || !data.word) throw new Error('Invalid data');
+                return {
+                    word: data.word.toUpperCase(),
+                    scrambled: scrambleWord(data.word.toUpperCase()),
+                    hint: data.hint || 'Tebak kata ini',
+                    category: data.category || 'general',
+                    difficulty: data.difficulty || 'medium'
+                };
+                
+            case 'tebakgambar':
+                data = await fetchFromGameAPI('games/tebak-gambar', options);
+                if (!data || !data.image_url) throw new Error('Invalid data');
+                return {
+                    image_url: data.image_url,
+                    answer: data.answer.toLowerCase(),
+                    hint: data.hint || 'Tebak apa ini',
+                    category: data.category || 'object'
+                };
+                
+            case 'quiz':
+                data = await fetchFromGameAPI('games/quiz', options);
+                if (!data || !data.question) throw new Error('Invalid data');
+                return {
+                    question: data.question,
+                    options: data.options || ['A. Option 1', 'B. Option 2', 'C. Option 3', 'D. Option 4'],
+                    answer: data.answer || 'A',
+                    explanation: data.explanation,
+                    category: data.category || 'general',
+                    difficulty: data.difficulty || 'medium',
+                    point: data.point || 10
+                };
+                
+            case 'truth':
+                data = await fetchFromGameAPI('games/truth', options);
+                if (!data || !data.question) throw new Error('Invalid data');
+                return data.question;
+                
+            case 'dare':
+                data = await fetchFromGameAPI('games/dare', options);
+                if (!data || !data.challenge) throw new Error('Invalid data');
+                return data.challenge;
+                
+            case 'tebaklagu':
+                data = await fetchFromGameAPI('games/tebak-lagu', options);
+                if (!data || !data.title) throw new Error('Invalid data');
+                return {
+                    title: data.title,
+                    artist: data.artist || 'Unknown Artist',
+                    year: data.year || 'Unknown',
+                    hint: data.hint || 'Tebak judul lagu ini',
+                    preview_url: data.preview_url
+                };
+                
+            case 'tebakbendera':
+                data = await fetchFromGameAPI('games/tebak-bendera', options);
+                if (!data || !data.country) throw new Error('Invalid data');
+                return {
+                    country: data.country,
+                    emoji: data.emoji || '🏳️',
+                    capital: data.capital || 'Unknown',
+                    hint: data.hint || 'Tebak negara ini',
+                    continent: data.continent || 'Unknown'
+                };
+                
+            case 'tebakemoji':
+                data = await fetchFromGameAPI('games/tebak-emoji', options);
+                if (!data || !data.emoji) throw new Error('Invalid data');
+                return {
+                    emoji: data.emoji,
+                    answer: data.answer,
+                    hint: data.hint || 'Tebak arti emoji ini'
+                };
+                
+            case 'tebaklirik':
+                data = await fetchFromGameAPI('games/tebak-lirik', options);
+                if (!data || !data.lyric) throw new Error('Invalid data');
+                return {
+                    lyric: data.lyric,
+                    next_line: data.next_line,
+                    song_title: data.song_title || 'Unknown Song',
+                    artist: data.artist || 'Unknown Artist',
+                    hint: data.hint || 'Sambung lirik berikutnya'
+                };
+                
+            case 'math':
+                data = await fetchFromGameAPI('games/math', options);
+                if (!data || !data.expression) throw new Error('Invalid data');
+                return {
+                    expression: data.expression,
+                    answer: data.answer,
+                    difficulty: data.difficulty || 'easy',
+                    time_limit: data.time_limit || 30
+                };
+                
+            case 'tebakangka':
+                // Generate random number
+                return {
+                    number: getRandomInt(1, 100),
+                    hint: 'Angka antara 1-100',
+                    max_attempts: 10
+                };
+                
+            case 'werewolf_roles':
+                data = await fetchFromGameAPI('games/werewolf/roles', options);
+                if (!data || !data.roles) throw new Error('Invalid data');
+                return data.roles;
+                
+            case 'rpg_items':
+                data = await fetchFromGameAPI('rpg/items', options);
+                if (!data || !data.items) throw new Error('Invalid data');
+                return data.items;
+                
+            case 'gacha_items':
+                data = await fetchFromGameAPI('games/gacha/items', options);
+                if (!data || !data.items) throw new Error('Invalid data');
+                return data.items;
+                
+            case 'pet_types':
+                data = await fetchFromGameAPI('games/pet/types', options);
+                if (!data || !data.pets) throw new Error('Invalid data');
+                return data.pets;
+                
+            default:
+                throw new Error(`Unknown game type: ${gameType}`);
+        }
+        
+        // Cache the data
+        gameStates.gameDataCache.set(cacheKey, {
+            data: data,
+            timestamp: now
+        });
+        
+        return data;
+        
+    } catch (error) {
+        console.error(`❌ Error getting ${gameType}:`, error.message);
+        return getFallbackData(gameType);
+    }
+}
+
+function getFallbackData(gameType) {
+    const fallbackData = {
+        tebakkata: () => ({
+            word: 'KOMPUTER',
+            scrambled: scrambleWord('KOMPUTER'),
+            hint: 'Alat untuk mengolah data',
+            category: 'technology',
+            difficulty: 'easy'
+        }),
+        
+        tebakgambar: () => ({
+            image_url: 'https://i.imgur.com/3A6Y7aB.jpeg',
+            answer: 'kucing',
+            hint: 'Hewan peliharaan',
+            category: 'animal'
+        }),
+        
+        quiz: () => ({
+            question: 'Ibukota Indonesia adalah?',
+            options: ['A. Jakarta', 'B. Bandung', 'C. Surabaya', 'D. Medan'],
+            answer: 'A',
+            explanation: 'Jakarta adalah ibukota Indonesia',
+            category: 'geography',
+            difficulty: 'easy',
+            point: 10
+        }),
+        
+        truth: () => 'Apa rahasia terbesar yang kamu sembunyikan dari teman-teman?',
+        
+        dare: () => 'Kirim suara kamu menyanyi lagu populer!',
+        
+        tebaklagu: () => ({
+            title: 'Smooth Criminal',
+            artist: 'Michael Jackson',
+            year: '1987',
+            hint: 'Lagu tentang kejahatan',
+            preview_url: null
+        }),
+        
+        tebakbendera: () => ({
+            country: 'Indonesia',
+            emoji: '🇮🇩',
+            capital: 'Jakarta',
+            hint: 'Merah Putih',
+            continent: 'Asia'
+        }),
+        
+        tebakemoji: () => ({
+            emoji: '🍜🔥',
+            answer: 'mie pedas',
+            hint: 'Makanan pedas'
+        }),
+        
+        tebaklirik: () => ({
+            lyric: 'Kisah klasik untuk dunia',
+            next_line: 'Yang selalu terngiang di telinga',
+            song_title: 'Unknown Song',
+            artist: 'Unknown Artist',
+            hint: 'Sambung lirik berikutnya'
+        }),
+        
+        math: () => ({
+            expression: `${getRandomInt(1, 20)} + ${getRandomInt(1, 20)}`,
+            answer: getRandomInt(2, 40),
+            difficulty: 'easy',
+            time_limit: 30
+        }),
+        
+        tebakangka: () => ({
+            number: getRandomInt(1, 100),
+            hint: 'Angka antara 1-100',
+            max_attempts: 10
+        }),
+        
+        werewolf_roles: () => [
+            { name: 'Werewolf', description: 'Pemakan manusia di malam hari', team: 'evil' },
+            { name: 'Villager', description: 'Warga desa yang baik', team: 'good' },
+            { name: 'Seer', description: 'Dapat melihat identitas pemain', team: 'good' },
+            { name: 'Doctor', description: 'Dapat menyembuhkan pemain', team: 'good' }
+        ],
+        
+        rpg_items: () => [
+            { id: 1, name: '⚔️ Pedang Besi', price: 100, type: 'weapon', power: 10 },
+            { id: 2, name: '🛡️ Perisai Kayu', price: 80, type: 'armor', defense: 8 },
+            { id: 3, name: '❤️ Potion Kecil', price: 30, type: 'potion', heal: 50 },
+            { id: 4, name: '❤️ Potion Besar', price: 60, type: 'potion', heal: 100 }
+        ],
+        
+        gacha_items: () => [
+            { name: '🪙 100 Koin', rarity: 'common', value: 100 },
+            { name: '🪙 500 Koin', rarity: 'rare', value: 500 },
+            { name: '💎 Batu Langka', rarity: 'epic', value: 1000 },
+            { name: '👑 Mahkota Emas', rarity: 'legendary', value: 5000 }
+        ],
+        
+        pet_types: () => [
+            { name: '🐉 Naga Kecil', type: 'dragon', rarity: 'legendary' },
+            { name: '🐱 Kucing Ajaib', type: 'cat', rarity: 'common' },
+            { name: '🐕 Anjing Setia', type: 'dog', rarity: 'common' },
+            { name: '🦄 Unicorn', type: 'unicorn', rarity: 'legendary' }
+        ]
+    };
+    
+    return fallbackData[gameType] ? fallbackData[gameType]() : null;
+}
+
 // Coin System Functions
 function getCoins(userId) {
     return gameStates.userCoins.get(userId) || 0;
@@ -358,7 +499,8 @@ function getRPGProfile(userId) {
             defense: 5,
             lastDaily: 0,
             lastWork: 0,
-            lastHunt: 0
+            lastHunt: 0,
+            created: Date.now()
         });
     }
     return gameStates.rpgProfiles.get(userId);
@@ -436,9 +578,27 @@ function checkCooldown(userId, type) {
             }
             cooldowns.fight = now;
             return { onCooldown: false };
+            
+        case 'spin':
+            if (cooldowns.spin && now - cooldowns.spin < 1 * 60 * 1000) {
+                const remaining = 1 * 60 * 1000 - (now - cooldowns.spin);
+                return { onCooldown: true, remaining };
+            }
+            cooldowns.spin = now;
+            return { onCooldown: false };
     }
     
     return { onCooldown: false };
+}
+
+function formatTime(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    
+    if (hours > 0) return `${hours} jam ${minutes % 60} menit`;
+    if (minutes > 0) return `${minutes} menit ${seconds % 60} detik`;
+    return `${seconds} detik`;
 }
 
 // Leaderboard Functions
@@ -471,71 +631,86 @@ function getGroupLeaderboard(groupId, limit = 10) {
     return entries.slice(0, limit);
 }
 
-// Game Functions
+// Game Functions - Semua game sekarang menggunakan API
 async function startTebakKata(sock, sender, pushName) {
-    const wordData = gameData.kataWords[Math.floor(Math.random() * gameData.kataWords.length)];
-    const scrambled = scrambleWord(wordData.kata);
-    
-    gameStates.tebakKata.set(sender, {
-        answer: wordData.kata,
-        scrambled: scrambled,
-        hint: wordData.hint,
-        attempts: 0,
-        startTime: Date.now(),
-        timer: setTimeout(() => {
-            gameStates.tebakKata.delete(sender);
-            sock.sendMessage(sender, { 
-                text: `⏰ *WAKTU HABIS!*\n\nKata yang benar: ${wordData.kata}\n\nKetik .tebakkata untuk bermain lagi!` 
-            });
-        }, 30000) // 30 detik
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ 🎮 *TEBAK KATA* 🎮 ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        `Susun kata: *${scrambled}*\n\n` +
-        `💡 Hint: ${wordData.hint}\n` +
-        `⏰ Waktu: 30 detik\n` +
-        `🎯 Kesempatan: 3x\n` +
-        `💰 Hadiah: 50 koin\n\n` +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Ketik jawabanmu sekarang!';
-    
-    await sock.sendMessage(sender, { text: gameText });
+    try {
+        const gameData = await getGameData('tebakkata', { difficulty: 'medium' });
+        
+        gameStates.tebakKata.set(sender, {
+            answer: gameData.word,
+            scrambled: gameData.scrambled,
+            hint: gameData.hint,
+            category: gameData.category,
+            attempts: 0,
+            startTime: Date.now(),
+            timer: setTimeout(() => {
+                gameStates.tebakKata.delete(sender);
+                sock.sendMessage(sender, { 
+                    text: `⏰ *WAKTU HABIS!*\n\nKata yang benar: ${gameData.word}\n\nKetik .tebakkata untuk bermain lagi!` 
+                });
+            }, 30000) // 30 detik
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🎮 *TEBAK KATA* 🎮 ┃\n' +
+            '┃   (API Powered)    ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `Susun kata: *${gameData.scrambled}*\n\n` +
+            `📚 Kategori: ${gameData.category}\n` +
+            `💡 Hint: ${gameData.hint}\n` +
+            `⏰ Waktu: 30 detik\n` +
+            `🎯 Kesempatan: 3x\n` +
+            `💰 Hadiah: 50 koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            'Ketik jawabanmu sekarang!';
+        
+        await sock.sendMessage(sender, { text: gameText });
+    } catch (error) {
+        console.error('Error starting tebakkata:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat game. Coba lagi nanti!' 
+        });
+    }
 }
 
 async function startTebakGambar(sock, sender, pushName) {
-    const imageData = gameData.gambarData[Math.floor(Math.random() * gameData.gambarData.length)];
-    
-    gameStates.tebakGambar.set(sender, {
-        answer: imageData.answer,
-        hint: imageData.hint,
-        attempts: 0,
-        startTime: Date.now()
-    });
-    
     try {
-        // Kirim gambar
-        const response = await axios.get(imageData.url, { responseType: 'arraybuffer' });
+        const gameData = await getGameData('tebakgambar', { category: 'animal' });
+        
+        gameStates.tebakGambar.set(sender, {
+            answer: gameData.answer,
+            hint: gameData.hint,
+            category: gameData.category,
+            attempts: 0,
+            startTime: Date.now()
+        });
+        
+        // Download and send image
+        const response = await axios.get(gameData.image_url, { 
+            responseType: 'arraybuffer',
+            timeout: 10000
+        });
+        
         const imageBuffer = Buffer.from(response.data);
         
         const gameText = 
             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
             '┃ 🖼️ *TEBAK GAMBAR* 🖼️ ┃\n' +
+            '┃   (API Powered)    ┃\n' +
             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
             '❓ Apa yang ada di gambar ini?\n\n' +
-            `💡 Hint: ${imageData.hint}\n` +
+            `📚 Kategori: ${gameData.category}\n` +
+            `💡 Hint: ${gameData.hint}\n` +
             `🎯 Kesempatan: 3x\n` +
-            `💰 Hadiah: 75 koin\n\n` +
-            '━━━━━━━━━━━━━━━━━━━━\n' +
-            'Ketik jawabanmu sekarang!';
+            `💰 Hadiah: 75 koin`;
         
         await sock.sendMessage(sender, { 
             image: imageBuffer,
             caption: gameText
         });
     } catch (error) {
+        console.error('Error starting tebakgambar:', error);
         await sock.sendMessage(sender, { 
             text: '❌ Gagal memuat gambar. Coba lagi nanti!' 
         });
@@ -543,173 +718,318 @@ async function startTebakGambar(sock, sender, pushName) {
 }
 
 async function startQuiz(sock, sender, pushName) {
-    const quiz = gameData.quizQuestions[Math.floor(Math.random() * gameData.quizQuestions.length)];
-    
-    gameStates.quizGames.set(sender, {
-        ...quiz,
-        startTime: Date.now(),
-        answered: false
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ 🎯 *KUIS* 🎯 ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        `❓ ${quiz.question}\n\n` +
-        `${quiz.options.join('\n')}\n\n` +
-        `⏰ Waktu: 30 detik\n` +
-        `💰 Hadiah: ${quiz.point} koin\n\n` +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Jawab dengan huruf (A/B/C/D)';
-    
-    await sock.sendMessage(sender, { text: gameText });
+    try {
+        const gameData = await getGameData('quiz', { category: 'general' });
+        
+        gameStates.quizGames.set(sender, {
+            ...gameData,
+            startTime: Date.now(),
+            answered: false
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🎯 *KUIS* 🎯 ┃\n' +
+            '┃  (API Powered)   ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `❓ ${gameData.question}\n\n` +
+            `${gameData.options.join('\n')}\n\n` +
+            `📚 Kategori: ${gameData.category}\n` +
+            `🎯 Kesulitan: ${gameData.difficulty}\n` +
+            `⏰ Waktu: 30 detik\n` +
+            `💰 Hadiah: ${gameData.point} koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            'Jawab dengan huruf (A/B/C/D)';
+        
+        await sock.sendMessage(sender, { text: gameText });
+        
+        // Set timeout
+        setTimeout(() => {
+            if (gameStates.quizGames.has(sender)) {
+                const game = gameStates.quizGames.get(sender);
+                if (!game.answered) {
+                    gameStates.quizGames.delete(sender);
+                    sock.sendMessage(sender, { 
+                        text: `⏰ *WAKTU HABIS!*\n\nJawaban: ${game.answer}\nPenjelasan: ${game.explanation || '-'}\n\nKetik .quiz untuk main lagi!` 
+                    });
+                }
+            }
+        }, 30000);
+        
+    } catch (error) {
+        console.error('Error starting quiz:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat kuis. Coba lagi nanti!' 
+        });
+    }
+}
+
+async function startTruth(sock, sender, pushName) {
+    try {
+        const question = await getGameData('truth');
+        
+        await sock.sendMessage(sender, { 
+            text: `🤫 *TRUTH*\n\n${question}\n\n━━━━━━━━━━━━━━━━━━━━\n💬 Jawab dengan jujur ya!` 
+        });
+    } catch (error) {
+        console.error('Error getting truth:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat truth. Coba lagi nanti!' 
+        });
+    }
+}
+
+async function startDare(sock, sender, pushName) {
+    try {
+        const challenge = await getGameData('dare');
+        
+        await sock.sendMessage(sender, { 
+            text: `😈 *DARE*\n\n${challenge}\n\n━━━━━━━━━━━━━━━━━━━━\n⚡ Lakukan dalam 5 menit!` 
+        });
+    } catch (error) {
+        console.error('Error getting dare:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat dare. Coba lagi nanti!' 
+        });
+    }
+}
+
+async function startTebakLagu(sock, sender, pushName) {
+    try {
+        const songData = await getGameData('tebaklagu');
+        
+        gameStates.tebakLagu.set(sender, {
+            answer: songData.title.toLowerCase(),
+            artist: songData.artist,
+            year: songData.year,
+            hint: songData.hint,
+            attempts: 0,
+            hintGiven: false,
+            startTime: Date.now()
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🎵 *TEBAK LAGU* 🎵 ┃\n' +
+            '┃   (API Powered)    ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            '🎶 Dengarkan lagu ini!\n\n' +
+            `🎤 Artis: ${songData.artist}\n` +
+            `📅 Tahun: ${songData.year}\n` +
+            `💡 Clue: ${songData.hint}\n` +
+            `🎯 Kesempatan: 3x\n` +
+            `💰 Hadiah: 100 koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            'Tebak judul lagunya!\n\n' +
+            '💡 Ketik "hint" untuk bantuan tambahan';
+        
+        await sock.sendMessage(sender, { text: gameText });
+    } catch (error) {
+        console.error('Error starting tebaklagu:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat game. Coba lagi nanti!' 
+        });
+    }
 }
 
 async function startTebakBendera(sock, sender, pushName) {
-    const bendera = gameData.bendera[Math.floor(Math.random() * gameData.bendera.length)];
-    
-    gameStates.tebakBendera.set(sender, {
-        answer: bendera.country,
-        emoji: bendera.emoji,
-        clue: bendera.clue,
-        attempts: 0,
-        startTime: Date.now()
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ 🏳️ *TEBAK BENDERA* 🏳️ ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        `Bendera: ${bendera.emoji}\n\n` +
-        `💡 Clue: ${bendera.clue}\n` +
-        `🎯 Kesempatan: 3x\n` +
-        `💰 Hadiah: 60 koin\n\n` +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Negara apakah ini?';
-    
-    await sock.sendMessage(sender, { text: gameText });
+    try {
+        const flagData = await getGameData('tebakbendera');
+        
+        gameStates.tebakBendera.set(sender, {
+            answer: flagData.country.toLowerCase(),
+            emoji: flagData.emoji,
+            capital: flagData.capital,
+            continent: flagData.continent,
+            hint: flagData.hint,
+            attempts: 0,
+            startTime: Date.now()
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🏳️ *TEBAK BENDERA* 🏳️ ┃\n' +
+            '┃    (API Powered)    ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `Bendera: ${flagData.emoji}\n\n` +
+            `💡 Clue: ${flagData.hint}\n` +
+            `🌍 Benua: ${flagData.continent}\n` +
+            `🎯 Kesempatan: 3x\n` +
+            `💰 Hadiah: 60 koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            'Negara apakah ini?';
+        
+        await sock.sendMessage(sender, { text: gameText });
+    } catch (error) {
+        console.error('Error starting tebakbendera:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat game. Coba lagi nanti!' 
+        });
+    }
 }
 
 async function startTebakEmoji(sock, sender, pushName) {
-    const puzzle = gameData.emojiPuzzles[Math.floor(Math.random() * gameData.emojiPuzzles.length)];
-    
-    gameStates.tebakEmoji.set(sender, {
-        answer: puzzle.answer,
-        emoji: puzzle.emoji,
-        hint: puzzle.hint,
-        attempts: 0,
-        startTime: Date.now()
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ 😀 *TEBAK EMOJI* 😀 ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        `Emoji: ${puzzle.emoji}\n\n` +
-        `💡 Hint: ${puzzle.hint}\n` +
-        `🎯 Kesempatan: 3x\n` +
-        `💰 Hadiah: 40 koin\n\n` +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Apa maksud dari emoji ini?';
-    
-    await sock.sendMessage(sender, { text: gameText });
+    try {
+        const emojiData = await getGameData('tebakemoji');
+        
+        gameStates.tebakEmoji.set(sender, {
+            answer: emojiData.answer.toLowerCase(),
+            emoji: emojiData.emoji,
+            hint: emojiData.hint,
+            attempts: 0,
+            startTime: Date.now()
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 😀 *TEBAK EMOJI* 😀 ┃\n' +
+            '┃   (API Powered)    ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `Emoji: ${emojiData.emoji}\n\n` +
+            `💡 Hint: ${emojiData.hint}\n` +
+            `🎯 Kesempatan: 3x\n` +
+            `💰 Hadiah: 40 koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            'Apa maksud dari emoji ini?';
+        
+        await sock.sendMessage(sender, { text: gameText });
+    } catch (error) {
+        console.error('Error starting tebakemoji:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat game. Coba lagi nanti!' 
+        });
+    }
 }
 
 async function startTebakLirik(sock, sender, pushName) {
-    const lirik = gameData.lirikLagu[Math.floor(Math.random() * gameData.lirikLagu.length)];
-    
-    gameStates.tebakLirik.set(sender, {
-        answer: lirik.next,
-        line: lirik.line,
-        attempts: 0,
-        startTime: Date.now()
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ 🎵 *TEBAK LIRIK* 🎵 ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        `🎶 "${lirik.line}"\n\n` +
-        'Sambung lirik berikutnya!\n\n' +
-        `🎯 Kesempatan: 3x\n` +
-        `💰 Hadiah: 55 koin\n\n` +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Ketik lirik selanjutnya!';
-    
-    await sock.sendMessage(sender, { text: gameText });
+    try {
+        const lyricData = await getGameData('tebaklirik');
+        
+        gameStates.tebakLirik.set(sender, {
+            answer: lyricData.next_line.toLowerCase(),
+            lyric: lyricData.lyric,
+            song_title: lyricData.song_title,
+            artist: lyricData.artist,
+            hint: lyricData.hint,
+            attempts: 0,
+            startTime: Date.now()
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🎵 *TEBAK LIRIK* 🎵 ┃\n' +
+            '┃   (API Powered)    ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `🎶 Lagu: ${lyricData.song_title}\n` +
+            `🎤 Artis: ${lyricData.artist}\n\n` +
+            `"${lyricData.lyric}"\n\n` +
+            `💡 ${lyricData.hint}\n` +
+            `🎯 Kesempatan: 3x\n` +
+            `💰 Hadiah: 55 koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            'Sambung lirik berikutnya!';
+        
+        await sock.sendMessage(sender, { text: gameText });
+    } catch (error) {
+        console.error('Error starting tebaklirik:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat game. Coba lagi nanti!' 
+        });
+    }
 }
 
 async function startMathBattle(sock, sender, pushName) {
-    const operations = ['+', '-', '*'];
-    const op = operations[Math.floor(Math.random() * operations.length)];
-    let num1, num2, answer;
-    
-    switch(op) {
-        case '+':
-            num1 = getRandomInt(10, 50);
-            num2 = getRandomInt(10, 50);
-            answer = num1 + num2;
-            break;
-        case '-':
-            num1 = getRandomInt(50, 100);
-            num2 = getRandomInt(10, 50);
-            answer = num1 - num2;
-            break;
-        case '*':
-            num1 = getRandomInt(2, 12);
-            num2 = getRandomInt(2, 12);
-            answer = num1 * num2;
-            break;
+    try {
+        const mathData = await getGameData('math', { difficulty: 'medium' });
+        
+        gameStates.mathBattle.set(sender, {
+            answer: mathData.answer,
+            expression: mathData.expression,
+            difficulty: mathData.difficulty,
+            startTime: Date.now(),
+            winner: null
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🧮 *MATH BATTLE* 🧮 ┃\n' +
+            '┃   (API Powered)    ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `Soal: ${mathData.expression} = ?\n\n` +
+            `🎯 Kesulitan: ${mathData.difficulty}\n` +
+            `⏰ Waktu: ${mathData.time_limit} detik\n` +
+            `💰 Hadiah: 100 koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            '⚡ Yang jawab duluan menang!';
+        
+        await sock.sendMessage(sender, { text: gameText });
+        
+        // Set timeout
+        setTimeout(() => {
+            if (gameStates.mathBattle.has(sender)) {
+                const game = gameStates.mathBattle.get(sender);
+                if (!game.winner) {
+                    gameStates.mathBattle.delete(sender);
+                    sock.sendMessage(sender, { 
+                        text: `⏰ *WAKTU HABIS!*\n\nJawaban: ${game.answer}\n\nKetik .mathbattle untuk main lagi!` 
+                    });
+                }
+            }
+        }, mathData.time_limit * 1000);
+        
+    } catch (error) {
+        console.error('Error starting mathbattle:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat game. Coba lagi nanti!' 
+        });
     }
-    
-    gameStates.mathBattle.set(sender, {
-        answer: answer,
-        question: `${num1} ${op} ${num2}`,
-        startTime: Date.now(),
-        winner: null
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ 🧮 *MATH BATTLE* 🧮 ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        `Soal: ${num1} ${op} ${num2} = ?\n\n` +
-        `⏰ Yang jawab duluan menang!\n` +
-        `💰 Hadiah: 100 koin\n\n` +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Cepat jawab!';
-    
-    await sock.sendMessage(sender, { text: gameText });
 }
 
 async function startTebakAngka(sock, sender, pushName) {
-    const secretNumber = getRandomInt(1, 100);
-    
-    gameStates.tebakAngka.set(sender, {
-        answer: secretNumber,
-        attempts: 0,
-        startTime: Date.now(),
-        min: 1,
-        max: 100
-    });
-    
-    const gameText = 
-        '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-        '┃ 🔢 *TEBAK ANGKA* 🔢 ┃\n' +
-        '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-        'Saya memilih angka antara 1-100\n\n' +
-        `💡 Saya akan kasih clue:\n` +
-        `"Terlalu besar" / "Terlalu kecil"\n\n` +
-        `🎯 Kesempatan: 10x\n` +
-        `💰 Hadiah: 150 koin\n\n` +
-        '━━━━━━━━━━━━━━━━━━━━\n' +
-        'Tebak angkanya!';
-    
-    await sock.sendMessage(sender, { text: gameText });
+    try {
+        const numberData = await getGameData('tebakangka');
+        
+        gameStates.tebakAngka.set(sender, {
+            answer: numberData.number,
+            hint: numberData.hint,
+            maxAttempts: numberData.max_attempts,
+            attempts: 0,
+            startTime: Date.now(),
+            min: 1,
+            max: 100
+        });
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🔢 *TEBAK ANGKA* 🔢 ┃\n' +
+            '┃   (API Powered)    ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `Saya memilih angka ${numberData.hint}\n\n` +
+            `💡 Saya akan kasih clue:\n` +
+            `"Terlalu besar" / "Terlalu kecil"\n\n` +
+            `🎯 Kesempatan: ${numberData.max_attempts}x\n` +
+            `💰 Hadiah: 150 koin\n\n` +
+            '━━━━━━━━━━━━━━━━━━━━\n' +
+            'Tebak angkanya!';
+        
+        await sock.sendMessage(sender, { text: gameText });
+    } catch (error) {
+        console.error('Error starting tebakangka:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memuat game. Coba lagi nanti!' 
+        });
+    }
 }
 
 async function startSuit(sock, sender, pushName) {
+    const choices = [
+        { emoji: '🪨', name: 'batu', beats: 'gunting' },
+        { emoji: '✂️', name: 'gunting', beats: 'kertas' },
+        { emoji: '📄', name: 'kertas', beats: 'batu' }
+    ];
+    
     gameStates.suitGames.set(sender, {
+        choices: choices,
         waiting: true
     });
     
@@ -718,128 +1038,469 @@ async function startSuit(sock, sender, pushName) {
         '┃ ✂️ *SUIT* ✂️ ┃\n' +
         '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
         'Pilih salah satu:\n\n' +
-        '`.suit batu` - 🪨\n' +
-        '`.suit gunting` - ✂️\n' +
-        '`.suit kertas` - 📄\n\n' +
+        '`.suit batu` - 🪨 Batu\n' +
+        '`.suit gunting` - ✂️ Gunting\n' +
+        '`.suit kertas` - 📄 Kertas\n\n' +
         '━━━━━━━━━━━━━━━━━━━━\n' +
         'Lawan: Bot 🤖';
     
     await sock.sendMessage(sender, { text: gameText });
 }
 
+async function startWerewolf(sock, sender, pushName) {
+    try {
+        if (!sender.endsWith('@g.us')) {
+            await sock.sendMessage(sender, { 
+                text: '❌ Werewolf hanya bisa dimainkan di grup!' 
+            });
+            return;
+        }
+        
+        // Get group participants
+        const groupMetadata = await sock.groupMetadata(sender);
+        const participants = groupMetadata.participants.filter(p => !p.id.endsWith('@s.whatsapp.net'));
+        
+        if (participants.length < 4) {
+            await sock.sendMessage(sender, { 
+                text: '❌ Minimal 4 pemain untuk bermain Werewolf!' 
+            });
+            return;
+        }
+        
+        const roles = await getGameData('werewolf_roles');
+        const shuffledPlayers = shuffleArray([...participants]);
+        
+        // Assign roles
+        const assignedRoles = {};
+        shuffledPlayers.forEach((player, index) => {
+            const role = roles[index % roles.length];
+            assignedRoles[player.id] = role;
+        });
+        
+        gameStates.werewolfGames.set(sender, {
+            players: participants.map(p => p.id),
+            roles: assignedRoles,
+            phase: 'setup',
+            alive: participants.map(p => p.id),
+            votes: {},
+            day: 1
+        });
+        
+        // Send role DMs
+        for (const player of participants) {
+            const role = assignedRoles[player.id];
+            await sock.sendMessage(player.id, {
+                text: `🎭 *ROLE WEREWOLF*\n\nKamu adalah: *${role.name}*\n\n${role.description}\n\nTim: ${role.team === 'evil' ? '😈 JAHAT' : '😇 BAIK'}\n\nJangan beritahu siapapun!`
+            });
+        }
+        
+        const gameText = 
+            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+            '┃ 🐺 *WEREWOLF* 🐺 ┃\n' +
+            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+            `🎮 Game Werewolf dimulai!\n` +
+            `👥 Pemain: ${participants.length} orang\n\n` +
+            `📱 Role sudah dikirim via DM!\n\n` +
+            `🌙 Malam pertama dimulai...\n\n` +
+            `💡 Pemain Werewolf, ketik .ww kill @target di DM`;
+        
+        await sock.sendMessage(sender, { text: gameText });
+        
+    } catch (error) {
+        console.error('Error starting werewolf:', error);
+        await sock.sendMessage(sender, { 
+            text: '❌ Gagal memulai game Werewolf!' 
+        });
+    }
+}
+
 // Express Server
 const app = express();
 app.use(express.json());
 
+// API Endpoints untuk mengelola game
+app.get('/api/games', async (req, res) => {
+    try {
+        const games = [
+            { id: 'tebakkata', name: 'Tebak Kata', description: 'Susun kata acak' },
+            { id: 'tebakgambar', name: 'Tebak Gambar', description: 'Tebak objek dalam gambar' },
+            { id: 'quiz', name: 'Quiz', description: 'Kuis pilihan ganda' },
+            { id: 'tebaklagu', name: 'Tebak Lagu', description: 'Tebak judul lagu' },
+            { id: 'tebakbendera', name: 'Tebak Bendera', description: 'Tebak negara dari bendera' },
+            { id: 'tebakemoji', name: 'Tebak Emoji', description: 'Tebak arti emoji' },
+            { id: 'tebaklirik', name: 'Tebak Lirik', description: 'Sambung lirik lagu' },
+            { id: 'mathbattle', name: 'Math Battle', description: 'Hitungan cepat' },
+            { id: 'suit', name: 'Suit', description: 'Batu gunting kertas' },
+            { id: 'tebakangka', name: 'Tebak Angka', description: 'Tebak angka 1-100' }
+        ];
+        
+        res.json({ success: true, games });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+app.get('/api/stats', (req, res) => {
+    const stats = {
+        active_games: {
+            tebakkata: gameStates.tebakKata.size,
+            quiz: gameStates.quizGames.size,
+            mathbattle: gameStates.mathBattle.size,
+            tebakangka: gameStates.tebakAngka.size
+        },
+        rpg_users: gameStates.rpgProfiles.size,
+        total_coins: Array.from(gameStates.userCoins.values()).reduce((a, b) => a + b, 0),
+        leaderboard_entries: gameStates.globalLeaderboard.size,
+        cache_size: gameStates.gameDataCache.size
+    };
+    
+    res.json({ success: true, stats });
+});
+
+app.get('/api/leaderboard', (req, res) => {
+    const limit = parseInt(req.query.limit) || 10;
+    const top = getGlobalLeaderboard(limit);
+    
+    const leaderboard = top.map(([userId, points], index) => ({
+        rank: index + 1,
+        userId: userId.split('@')[0],
+        points: points
+    }));
+    
+    res.json({ success: true, leaderboard });
+});
+
+app.post('/api/add-game', async (req, res) => {
+    try {
+        const { api_key, game_type, data } = req.body;
+        
+        if (api_key !== GAME_API_KEY) {
+            return res.status(401).json({ success: false, error: 'Unauthorized' });
+        }
+        
+        // Clear cache untuk game type tertentu
+        for (const [key, value] of gameStates.gameDataCache.entries()) {
+            if (key.startsWith(game_type)) {
+                gameStates.gameDataCache.delete(key);
+            }
+        }
+        
+        res.json({ success: true, message: 'Cache cleared' });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 app.get('/', (req, res) => {
+    const stats = {
+        active_games: gameStates.tebakKata.size + gameStates.quizGames.size + gameStates.mathBattle.size,
+        rpg_users: gameStates.rpgProfiles.size,
+        total_coins: Array.from(gameStates.userCoins.values()).reduce((a, b) => a + b, 0),
+        uptime: formatRuntime(Date.now() - BOT_START_TIME)
+    };
+    
     res.send(`
         <!DOCTYPE html>
         <html>
         <head>
-            <title>${BOT_NAME}</title>
-            <meta http-equiv="refresh" content="10">
+            <title>${BOT_NAME} - Game Dashboard</title>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
-                * { margin: 0; padding: 0; }
+                * {
+                    margin: 0;
+                    padding: 0;
+                    box-sizing: border-box;
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                }
+                
                 body {
-                    font-family: Arial, sans-serif;
-                    background: linear-gradient(135deg, #667eea, #764ba2);
-                    display: flex;
-                    justify-content: center;
-                    align-items: center;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
                     min-height: 100vh;
                     padding: 20px;
-                }
-                .status-box {
-                    background: white;
-                    padding: 50px;
-                    border-radius: 20px;
-                    text-align: center;
-                    box-shadow: 0 10px 40px rgba(0,0,0,0.2);
-                    max-width: 600px;
-                    width: 100%;
-                }
-                h1 {
-                    color: #667eea;
-                    margin-bottom: 20px;
-                    font-size: 32px;
-                }
-                .status {
-                    padding: 15px 30px;
-                    background: #4CAF50;
-                    color: white;
-                    border-radius: 25px;
-                    font-weight: bold;
-                    margin: 20px 0;
-                    font-size: 18px;
-                    display: inline-block;
-                }
-                .stats {
-                    display: grid;
-                    grid-template-columns: repeat(2, 1fr);
-                    gap: 15px;
-                    margin: 20px 0;
-                }
-                .stat-item {
-                    background: #f8f9fa;
-                    padding: 15px;
-                    border-radius: 10px;
-                    text-align: center;
-                }
-                .stat-item h3 {
-                    color: #667eea;
-                    margin: 0 0 5px 0;
-                    font-size: 14px;
-                }
-                .stat-item p {
-                    font-size: 18px;
-                    font-weight: bold;
-                    margin: 0;
                     color: #333;
                 }
-                .owner {
+                
+                .container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                }
+                
+                header {
+                    background: white;
+                    padding: 30px;
+                    border-radius: 20px;
+                    margin-bottom: 30px;
+                    text-align: center;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+                }
+                
+                h1 {
+                    color: #667eea;
+                    margin-bottom: 10px;
+                    font-size: 2.5rem;
+                }
+                
+                .subtitle {
                     color: #666;
+                    font-size: 1.1rem;
+                    margin-bottom: 20px;
+                }
+                
+                .stats-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+                    gap: 20px;
+                    margin-bottom: 30px;
+                }
+                
+                .stat-card {
+                    background: white;
+                    padding: 25px;
+                    border-radius: 15px;
+                    text-align: center;
+                    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+                    transition: transform 0.3s ease;
+                }
+                
+                .stat-card:hover {
+                    transform: translateY(-5px);
+                }
+                
+                .stat-icon {
+                    font-size: 2.5rem;
+                    margin-bottom: 15px;
+                }
+                
+                .stat-value {
+                    font-size: 2rem;
+                    font-weight: bold;
+                    color: #667eea;
+                    margin-bottom: 5px;
+                }
+                
+                .stat-label {
+                    color: #666;
+                    font-size: 0.9rem;
+                }
+                
+                .games-grid {
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+                    gap: 20px;
+                }
+                
+                .game-card {
+                    background: white;
+                    padding: 25px;
+                    border-radius: 15px;
+                    box-shadow: 0 5px 15px rgba(0,0,0,0.05);
+                }
+                
+                .game-card h3 {
+                    color: #667eea;
+                    margin-bottom: 15px;
+                    padding-bottom: 10px;
+                    border-bottom: 2px solid #f0f0f0;
+                }
+                
+                .game-list {
+                    list-style: none;
+                }
+                
+                .game-list li {
+                    padding: 12px 0;
+                    border-bottom: 1px solid #f5f5f5;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                
+                .game-list li:last-child {
+                    border-bottom: none;
+                }
+                
+                .api-status {
+                    background: white;
+                    padding: 25px;
+                    border-radius: 15px;
+                    margin-top: 30px;
+                }
+                
+                .status-online {
+                    color: #4CAF50;
+                    font-weight: bold;
+                }
+                
+                .api-info {
+                    margin-top: 15px;
+                    padding: 15px;
+                    background: #f8f9fa;
+                    border-radius: 10px;
+                    font-family: monospace;
+                    font-size: 0.9rem;
+                }
+                
+                footer {
+                    text-align: center;
+                    margin-top: 40px;
+                    color: white;
+                    padding: 20px;
+                }
+                
+                .refresh-btn {
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    padding: 12px 25px;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    font-size: 1rem;
                     margin-top: 20px;
-                    font-size: 14px;
+                    transition: background 0.3s ease;
+                }
+                
+                .refresh-btn:hover {
+                    background: #5a67d8;
+                }
+                
+                @media (max-width: 768px) {
+                    .container {
+                        padding: 10px;
+                    }
+                    
+                    header {
+                        padding: 20px;
+                    }
+                    
+                    h1 {
+                        font-size: 2rem;
+                    }
+                    
+                    .games-grid {
+                        grid-template-columns: 1fr;
+                    }
                 }
             </style>
         </head>
         <body>
-            <div class="status-box">
-                <h1>🤖 ${BOT_NAME}</h1>
-                <div class="status">✅ ONLINE & CONNECTED</div>
-                <p>Bot dengan 15+ game siap dimainkan!</p>
+            <div class="container">
+                <header>
+                    <h1>🤖 ${BOT_NAME}</h1>
+                    <p class="subtitle">WhatsApp Bot with Dynamic Games from API</p>
+                    <button class="refresh-btn" onclick="location.reload()">🔄 Refresh Stats</button>
+                </header>
                 
-                <div class="stats">
-                    <div class="stat-item">
-                        <h3>⏰ UPTIME</h3>
-                        <p>${formatRuntime(Date.now() - BOT_START_TIME)}</p>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">🎮</div>
+                        <div class="stat-value">${stats.active_games}</div>
+                        <div class="stat-label">Active Games</div>
                     </div>
-                    <div class="stat-item">
-                        <h3>🎮 TOTAL GAMES</h3>
-                        <p>15+ Games</p>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-value">${stats.rpg_users}</div>
+                        <div class="stat-label">RPG Players</div>
                     </div>
-                    <div class="stat-item">
-                        <h3>💰 COIN SYSTEM</h3>
-                        <p>ACTIVE</p>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">💰</div>
+                        <div class="stat-value">${stats.total_coins.toLocaleString()}</div>
+                        <div class="stat-label">Total Coins</div>
                     </div>
-                    <div class="stat-item">
-                        <h3>🏆 LEADERBOARD</h3>
-                        <p>ACTIVE</p>
-                    </div>
-                    <div class="stat-item">
-                        <h3>⚔️ RPG SYSTEM</h3>
-                        <p>ACTIVE</p>
-                    </div>
-                    <div class="stat-item">
-                        <h3>👥 GROUPS</h3>
-                        <p>${welcomeEnabled.size}</p>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">⏱️</div>
+                        <div class="stat-value">${stats.uptime}</div>
+                        <div class="stat-label">Uptime</div>
                     </div>
                 </div>
                 
-                <div class="owner">👤 Owner: ${OWNER_NUMBER}</div>
-                <div class="owner">💾 Database: MongoDB ✓</div>
-                <div class="owner">🔄 Halaman ini akan refresh otomatis</div>
+                <div class="games-grid">
+                    <div class="game-card">
+                        <h3>🎮 Word Games</h3>
+                        <ul class="game-list">
+                            <li>.tebakkata <span>🔤</span></li>
+                            <li>.tebakemoji <span>😀</span></li>
+                            <li>.tebaklirik <span>🎵</span></li>
+                            <li>.quiz <span>🧠</span></li>
+                        </ul>
+                    </div>
+                    
+                    <div class="game-card">
+                        <h3>🖼️ Visual Games</h3>
+                        <ul class="game-list">
+                            <li>.tebakgambar <span>📸</span></li>
+                            <li>.tebakbendera <span>🏳️</span></li>
+                            <li>.tebaklagu <span>🎶</span></li>
+                        </ul>
+                    </div>
+                    
+                    <div class="game-card">
+                        <h3>⚔️ RPG System</h3>
+                        <ul class="game-list">
+                            <li>.profile <span>👤</span></li>
+                            <li>.daily <span>🎁</span></li>
+                            <li>.work <span>💼</span></li>
+                            <li>.hunt <span>🏹</span></li>
+                            <li>.shop <span>🛒</span></li>
+                            <li>.inventory <span>📦</span></li>
+                        </ul>
+                    </div>
+                    
+                    <div class="game-card">
+                        <h3>🎲 Casual Games</h3>
+                        <ul class="game-list">
+                            <li>.truth <span>🤫</span></li>
+                            <li>.dare <span>😈</span></li>
+                            <li>.suit <span>✂️</span></li>
+                            <li>.mathbattle <span>🧮</span></li>
+                            <li>.tebakangka <span>🔢</span></li>
+                            <li>.spin <span>🎰</span></li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="api-status">
+                    <h3>🔧 API Status</h3>
+                    <p>Game Source: <span class="status-online">${GAME_API_BASE}</span></p>
+                    <div class="api-info">
+                        📁 Semua game data diambil dari API<br>
+                        🔄 Auto refresh setiap 5 menit<br>
+                        📊 Total cache: ${gameStates.gameDataCache.size} items
+                    </div>
+                </div>
             </div>
+            
+            <footer>
+                <p>© 2024 ${BOT_NAME} - All games powered by dynamic API</p>
+                <p>👤 Owner: ${OWNER_NUMBER} | ⚡ Real-time Game Updates</p>
+            </footer>
+            
+            <script>
+                // Auto-refresh every 60 seconds
+                setTimeout(() => location.reload(), 60000);
+                
+                // Fetch live stats
+                async function fetchStats() {
+                    try {
+                        const response = await fetch('/api/stats');
+                        const data = await response.json();
+                        if (data.success) {
+                            console.log('Live Stats:', data.stats);
+                        }
+                    } catch (error) {
+                        console.error('Error fetching stats:', error);
+                    }
+                }
+                
+                // Initial fetch
+                fetchStats();
+                
+                // Update every 30 seconds
+                setInterval(fetchStats, 30000);
+            </script>
         </body>
         </html>
     `);
@@ -849,11 +1510,12 @@ app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
         bot: BOT_NAME,
-        owner: OWNER_NUMBER,
+        api_base: GAME_API_BASE,
         uptime: formatRuntime(Date.now() - BOT_START_TIME),
         games_active: gameStates.tebakKata.size + gameStates.quizGames.size,
         rpg_users: gameStates.rpgProfiles.size,
         total_coins: Array.from(gameStates.userCoins.values()).reduce((a, b) => a + b, 0),
+        cache_size: gameStates.gameDataCache.size,
         timestamp: new Date().toISOString()
     });
 });
@@ -861,20 +1523,22 @@ app.get('/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🌐 Dashboard: http://localhost:${PORT}`);
+    console.log(`🎮 Game API: ${GAME_API_BASE}`);
+    console.log(`🔑 API Key: ${GAME_API_KEY ? 'SET' : 'NOT SET'}`);
 });
 
 // Main Bot Function
 async function startBot() {
     try {
-        console.log('🚀 Starting WhatsApp Bot with 15+ Games...');
+        console.log('🚀 Starting WhatsApp Bot with Dynamic Games...');
         
         const { state, saveCreds, clearData } = await useMongoAuthState();
         const { version } = await fetchLatestBaileysVersion();
         
         console.log(`📱 WhatsApp v${version.join('.')}`);
         console.log(`🤖 Bot: ${BOT_NAME}`);
-        console.log(`👤 Owner: ${OWNER_NUMBER}`);
-        console.log(`🎮 Total Games: 15+`);
+        console.log(`🎮 Game Mode: DYNAMIC API`);
+        console.log(`🌐 API Base: ${GAME_API_BASE}`);
         console.log(`💰 Coin System: Active`);
         console.log(`🏆 Leaderboard: Active`);
         console.log(`⚔️ RPG System: Active`);
@@ -910,16 +1574,17 @@ async function startBot() {
                     console.log('❌ Logged out, please scan QR again');
                 }
             } else if (connection === 'open') {
-                console.log('\n╔══════════════════════════════════════╗');
-                console.log('║  ✅ ' + BOT_NAME + ' ONLINE!         ║');
-                console.log('║  🎮 15+ Games Ready ✓                ║');
-                console.log('║  💰 Coin System Active ✓             ║');
-                console.log('║  🏆 Leaderboard Active ✓             ║');
-                console.log('║  ⚔️ RPG System Active ✓              ║');
-                console.log('║  👥 Group Tools Ready ✓              ║');
-                console.log('║  👋 Welcome/Leave Active ✓           ║');
-                console.log('║  💾 MongoDB Connected ✓              ║');
-                console.log('╚══════════════════════════════════════╝\n');
+                console.log('\n╔══════════════════════════════════════════╗');
+                console.log('║  ✅ ' + BOT_NAME + ' ONLINE!             ║');
+                console.log('║  🎮 Dynamic Games from API ✓            ║');
+                console.log('║  🌐 API: ' + GAME_API_BASE + '   ║');
+                console.log('║  💰 Coin System Active ✓                ║');
+                console.log('║  🏆 Leaderboard Active ✓                ║');
+                console.log('║  ⚔️ RPG System Active ✓                 ║');
+                console.log('║  👥 Group Tools Ready ✓                 ║');
+                console.log('║  👋 Welcome/Leave Active ✓              ║');
+                console.log('║  💾 MongoDB Connected ✓                 ║');
+                console.log('╚══════════════════════════════════════════╝\n');
                 
                 try {
                     const dateInfo = getFormattedDate();
@@ -934,7 +1599,8 @@ async function startBot() {
                         '⏰ ' + dateInfo.time + '\n' +
                         '⏱️ Uptime: ' + runtime + '\n\n' +
                         '━━━━━━━━━━━━━━━━━━━━\n' +
-                        '🎮 15+ Games Ready ✓\n' +
+                        '🎮 Dynamic Games from API ✓\n' +
+                        '🌐 API: ' + GAME_API_BASE + '\n' +
                         '💰 Coin System Active ✓\n' +
                         '🏆 Leaderboard Active ✓\n' +
                         '⚔️ RPG System Active ✓\n' +
@@ -1080,7 +1746,7 @@ async function startBot() {
                     const args = text.trim().split(' ').slice(1);
                     
                     // ==================== MENU & GAMES LIST ====================
-                    if (command === '.menu' || command === '.games') {
+                    if (command === '.menu' || command === '.games' || command === '.help') {
                         const greeting = getGreeting();
                         const dateInfo = getFormattedDate();
                         const runtime = formatRuntime(Date.now() - BOT_START_TIME);
@@ -1089,6 +1755,7 @@ async function startBot() {
                         const menuText = 
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
                             '┃  🎮 *' + BOT_NAME.toUpperCase() + '* 🎮  ┃\n' +
+                            '┃   (API Powered)    ┃\n' +
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             greeting + ', *' + pushName + '*! ✨\n' +
                             `💰 Koin: ${coins}\n\n` +
@@ -1097,59 +1764,54 @@ async function startBot() {
                             '⏱️ Runtime: ' + runtime + '\n\n' +
                             
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🎯 *WORD GAMES*\n' +
+                            '┃ 🎯 *WORD GAMES* 🎯\n' +
                             '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .tebakkata - Susun kata acak\n' +
-                            '┃ .tebakemoji - Tebak arti emoji\n' +
-                            '┃ .tebaklirik - Sambung lirik lagu\n' +
+                            '┃ .tebakkata - Susun kata acak (API)\n' +
+                            '┃ .tebakemoji - Tebak arti emoji (API)\n' +
+                            '┃ .tebaklirik - Sambung lirik lagu (API)\n' +
+                            '┃ .quiz - Kuis pilihan ganda (API)\n' +
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🖼️ *IMAGE GAMES*\n' +
+                            '┃ 🖼️ *VISUAL GAMES* 🖼️\n' +
                             '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .tebakgambar - Tebak gambar\n' +
-                            '┃ .tebakbendera - Tebak bendera\n' +
+                            '┃ .tebakgambar - Tebak gambar (API)\n' +
+                            '┃ .tebakbendera - Tebak bendera (API)\n' +
+                            '┃ .tebaklagu - Tebak judul lagu (API)\n' +
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🧠 *QUIZ & TRIVIA*\n' +
+                            '┃ 🧠 *FUN GAMES* 🧠\n' +
                             '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .quiz - Kuis pilihan ganda\n' +
-                            '┃ .truth - Pertanyaan jujur\n' +
-                            '┃ .dare - Tantangan seru\n' +
-                            '┃ .mathbattle - Hitungan cepat\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🎵 *MUSIC GAMES*\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                            '┃ .tebaklagu - Tebak judul lagu\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🎲 *CASUAL GAMES*\n' +
-                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                            '┃ .truth - Pertanyaan jujur (API)\n' +
+                            '┃ .dare - Tantangan seru (API)\n' +
+                            '┃ .mathbattle - Hitungan cepat (API)\n' +
                             '┃ .suit - Batu gunting kertas\n' +
                             '┃ .tebakangka - Tebak angka 1-100\n' +
                             '┃ .spin - Spin gacha\n' +
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ ⚔️ *RPG SYSTEM*\n' +
+                            '┃ ⚔️ *RPG SYSTEM* ⚔️\n' +
                             '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
                             '┃ .profile - Profil RPG\n' +
-                            '┃ .daily - Klaim harian\n' +
-                            '┃ .work - Kerja dapet koin\n' +
-                            '┃ .hunt - Berburu item\n' +
-                            '┃ .fight @tag - PvP battle\n' +
-                            '┃ .shop - Toko item\n' +
+                            '┃ .daily - Klaim harian (24h)\n' +
+                            '┃ .work - Kerja dapet koin (5m)\n' +
+                            '┃ .hunt - Berburu item (10m)\n' +
+                            '┃ .shop - Toko item (API)\n' +
                             '┃ .inventory - Inventory\n' +
-                            '┃ .adopt - Adopsi pet\n' +
+                            '┃ .adopt - Adopsi pet (API)\n' +
                             '┃ .pet - Lihat pet\n' +
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 📊 *LEADERBOARD*\n' +
+                            '┃ 🐺 *GROUP GAMES* 🐺\n' +
+                            '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
+                            '┃ .ww start - Werewolf game\n' +
+                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                            
+                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                            '┃ 📊 *LEADERBOARD* 📊\n' +
                             '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
                             '┃ .topglobal - Top 10 global\n' +
                             '┃ .topgroup - Top 10 grup\n' +
@@ -1157,7 +1819,7 @@ async function startBot() {
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🛠️ *TOOLS*\n' +
+                            '┃ 🛠️ *TOOLS* 🛠️\n' +
                             '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
                             '┃ .ping - Test bot\n' +
                             '┃ .runtime - Uptime bot\n' +
@@ -1166,8 +1828,10 @@ async function startBot() {
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             
                             '━━━━━━━━━━━━━━━━━━━━\n' +
-                            '💡 Setiap game berikan koin!\n' +
+                            '🌐 Semua game diambil dari API\n' +
+                            '💰 Setiap game berikan koin!\n' +
                             '👤 Owner: wa.me/' + OWNER_NUMBER + '\n' +
+                            '🔧 API: ' + GAME_API_BASE + '\n' +
                             '━━━━━━━━━━━━━━━━━━━━';
                         
                         await sock.sendMessage(sender, { text: menuText });
@@ -1182,31 +1846,6 @@ async function startBot() {
                             text: '✅ Session dihapus dari MongoDB!\n\nBot akan restart dalam 5 detik...' 
                         });
                         setTimeout(() => process.exit(1), 5000);
-                        continue;
-                    }
-                    
-                    // ==================== WELCOME COMMANDS ====================
-                    if (command === '.enablewelcome') {
-                        if (!isGroup) {
-                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
-                            continue;
-                        }
-                        welcomeEnabled.set(sender, true);
-                        await sock.sendMessage(sender, { 
-                            text: '✅ *Fitur Welcome diaktifkan!*' 
-                        });
-                        continue;
-                    }
-                    
-                    if (command === '.disablewelcome') {
-                        if (!isGroup) {
-                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
-                            continue;
-                        }
-                        welcomeEnabled.set(sender, false);
-                        await sock.sendMessage(sender, { 
-                            text: '❌ *Fitur Welcome dinonaktifkan!*' 
-                        });
                         continue;
                     }
                     
@@ -1229,7 +1868,7 @@ async function startBot() {
                             updateLeaderboard(userId, 10, isGroup ? sender : null);
                             
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +10 poin leaderboard\n\nKata: ${game.answer}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
+                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +10 poin leaderboard\n\nKata: ${game.answer}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik\nKategori: ${game.category}` 
                             });
                         } else {
                             game.attempts++;
@@ -1237,7 +1876,7 @@ async function startBot() {
                                 clearTimeout(game.timer);
                                 gameStates.tebakKata.delete(sender);
                                 await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nKata yang benar: ${game.answer}\n\n💡 Ketik .tebakkata untuk bermain lagi` 
+                                    text: `💀 *GAME OVER!*\n\nKata yang benar: ${game.answer}\nKategori: ${game.category}\n\n💡 Ketik .tebakkata untuk bermain lagi` 
                                 });
                             } else {
                                 const hintMsg = game.attempts === 2 ? `💡 Hint: ${game.hint}\n` : '';
@@ -1267,14 +1906,14 @@ async function startBot() {
                             updateLeaderboard(userId, 15, isGroup ? sender : null);
                             
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +15 poin leaderboard\n\nJawaban: ${game.answer}` 
+                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +15 poin leaderboard\n\nJawaban: ${game.answer}\nKategori: ${game.category}` 
                             });
                         } else {
                             game.attempts++;
                             if (game.attempts >= 3) {
                                 gameStates.tebakGambar.delete(sender);
                                 await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nJawaban yang benar: ${game.answer}\n\n💡 Ketik .tebakgambar untuk bermain lagi` 
+                                    text: `💀 *GAME OVER!*\n\nJawaban yang benar: ${game.answer}\nKategori: ${game.category}\n\n💡 Ketik .tebakgambar untuk bermain lagi` 
                                 });
                             } else {
                                 await sock.sendMessage(sender, { 
@@ -1297,17 +1936,18 @@ async function startBot() {
                         const userAnswer = text.toUpperCase().trim();
                         
                         if (userAnswer === game.answer) {
+                            game.answered = true;
                             gameStates.quizGames.delete(sender);
                             addCoins(userId, game.point);
                             updateLeaderboard(userId, 5, isGroup ? sender : null);
                             
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Jawaban benar!\n💰 +${game.point} koin\n🏆 +5 poin leaderboard\n\n💡 Waktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
+                                text: `✅ *BENAR!*\n\n🎉 Jawaban benar!\n💰 +${game.point} koin\n🏆 +5 poin leaderboard\n\n💡 Penjelasan: ${game.explanation || '-'}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
                             });
                         } else {
                             gameStates.quizGames.delete(sender);
                             await sock.sendMessage(sender, { 
-                                text: `❌ *SALAH!*\n\nJawaban yang benar: ${game.answer}\n\n💡 Ketik .quiz untuk bermain lagi` 
+                                text: `❌ *SALAH!*\n\nJawaban yang benar: ${game.answer}\nPenjelasan: ${game.explanation || '-'}\n\n💡 Ketik .quiz untuk bermain lagi` 
                             });
                         }
                         continue;
@@ -1315,46 +1955,18 @@ async function startBot() {
                     
                     // ==================== GAME 4: TRUTH OR DARE ====================
                     if (command === '.truth') {
-                        const randomTruth = gameData.truthQuestions[Math.floor(Math.random() * gameData.truthQuestions.length)];
-                        await sock.sendMessage(sender, { 
-                            text: `🤫 *TRUTH*\n\n${randomTruth}\n\n━━━━━━━━━━━━━━━━━━━━\n💬 Jawab dengan jujur ya!` 
-                        });
+                        await startTruth(sock, sender, pushName);
                         continue;
                     }
                     
                     if (command === '.dare') {
-                        const randomDare = gameData.dareChallenges[Math.floor(Math.random() * gameData.dareChallenges.length)];
-                        await sock.sendMessage(sender, { 
-                            text: `😈 *DARE*\n\n${randomDare}\n\n━━━━━━━━━━━━━━━━━━━━\n⚡ Lakukan dalam 5 menit!` 
-                        });
+                        await startDare(sock, sender, pushName);
                         continue;
                     }
                     
                     // ==================== GAME 5: TEBAK LAGU ====================
                     if (command === '.tebaklagu') {
-                        const song = gameData.songs[Math.floor(Math.random() * gameData.songs.length)];
-                        
-                        gameStates.tebakLagu.set(sender, {
-                            answer: song.title.toLowerCase(),
-                            artist: song.artist,
-                            hint: song.hint,
-                            attempts: 0,
-                            hintGiven: false
-                        });
-                        
-                        const gameText = 
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🎵 *TEBAK LAGU* 🎵 ┃\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            '🎶 Dengarkan lagu ini!\n\n' +
-                            `💡 Clue: ${song.artist}\n` +
-                            `🎯 Kesempatan: 3x\n` +
-                            `💰 Hadiah: 100 koin\n\n` +
-                            '━━━━━━━━━━━━━━━━━━━━\n' +
-                            'Tebak judul lagunya!\n\n' +
-                            '💡 Ketik "hint" untuk bantuan';
-                        
-                        await sock.sendMessage(sender, { text: gameText });
+                        await startTebakLagu(sock, sender, pushName);
                         continue;
                     }
                     
@@ -1365,7 +1977,7 @@ async function startBot() {
                         if (text.toLowerCase() === 'hint' && !game.hintGiven) {
                             game.hintGiven = true;
                             await sock.sendMessage(sender, { 
-                                text: `💡 *HINT:* ${game.hint}\n\n🎯 Kesempatan tersisa: ${3 - game.attempts}` 
+                                text: `💡 *HINT TAMBAHAN:* Tahun rilis: ${game.year}\n\n🎯 Kesempatan tersisa: ${3 - game.attempts}` 
                             });
                             continue;
                         }
@@ -1379,14 +1991,14 @@ async function startBot() {
                             updateLeaderboard(userId, 20, isGroup ? sender : null);
                             
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +20 poin leaderboard\n\nJudul: ${game.answer.toUpperCase()}\nArtis: ${game.artist}` 
+                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +20 poin leaderboard\n\nJudul: ${game.answer.toUpperCase()}\nArtis: ${game.artist}\nTahun: ${game.year}` 
                             });
                         } else {
                             game.attempts++;
                             if (game.attempts >= 3) {
                                 gameStates.tebakLagu.delete(sender);
                                 await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nJudul yang benar: ${game.answer.toUpperCase()}\nArtis: ${game.artist}\n\n💡 Ketik .tebaklagu untuk bermain lagi` 
+                                    text: `💀 *GAME OVER!*\n\nJudul yang benar: ${game.answer.toUpperCase()}\nArtis: ${game.artist}\nTahun: ${game.year}\n\n💡 Ketik .tebaklagu untuk bermain lagi` 
                                 });
                             } else {
                                 await sock.sendMessage(sender, { 
@@ -1408,21 +2020,21 @@ async function startBot() {
                         const game = gameStates.tebakBendera.get(sender);
                         const userAnswer = text.toLowerCase().trim();
                         
-                        if (userAnswer === game.answer.toLowerCase()) {
+                        if (userAnswer === game.answer) {
                             gameStates.tebakBendera.delete(sender);
                             const coinsEarned = 60;
                             addCoins(userId, coinsEarned);
                             updateLeaderboard(userId, 12, isGroup ? sender : null);
                             
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +12 poin leaderboard\n\nNegara: ${game.answer}\nBendera: ${game.emoji}` 
+                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +12 poin leaderboard\n\nNegara: ${game.answer.toUpperCase()}\nIbukota: ${game.capital}\nBenua: ${game.continent}\nBendera: ${game.emoji}` 
                             });
                         } else {
                             game.attempts++;
                             if (game.attempts >= 3) {
                                 gameStates.tebakBendera.delete(sender);
                                 await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nNegara yang benar: ${game.answer}\nBendera: ${game.emoji}\n\n💡 Ketik .tebakbendera untuk bermain lagi` 
+                                    text: `💀 *GAME OVER!*\n\nNegara yang benar: ${game.answer.toUpperCase()}\nIbukota: ${game.capital}\nBenua: ${game.continent}\nBendera: ${game.emoji}\n\n💡 Ketik .tebakbendera untuk bermain lagi` 
                                 });
                             } else {
                                 await sock.sendMessage(sender, { 
@@ -1458,7 +2070,7 @@ async function startBot() {
                             if (game.attempts >= 3) {
                                 gameStates.tebakEmoji.delete(sender);
                                 await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nArti yang benar: ${game.answer}\n\n💡 Ketik .tebakemoji untuk bermain lagi` 
+                                    text: `💀 *GAME OVER!*\n\nArti yang benar: ${game.answer}\nEmoji: ${game.emoji}\n\n💡 Ketik .tebakemoji untuk bermain lagi` 
                                 });
                             } else {
                                 await sock.sendMessage(sender, { 
@@ -1480,21 +2092,21 @@ async function startBot() {
                         const game = gameStates.tebakLirik.get(sender);
                         const userAnswer = text.toLowerCase().trim();
                         
-                        if (userAnswer === game.answer.toLowerCase()) {
+                        if (userAnswer === game.answer) {
                             gameStates.tebakLirik.delete(sender);
                             const coinsEarned = 55;
                             addCoins(userId, coinsEarned);
                             updateLeaderboard(userId, 11, isGroup ? sender : null);
                             
                             await sock.sendMessage(sender, { 
-                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +11 poin leaderboard\n\nLirik lengkap:\n"${game.line}"\n"${game.answer}"` 
+                                text: `✅ *BENAR!*\n\n🎉 Kamu menang!\n💰 +${coinsEarned} koin\n🏆 +11 poin leaderboard\n\nLirik lengkap:\n"${game.lyric}"\n"${game.answer}"\n\nLagu: ${game.song_title}\nArtis: ${game.artist}` 
                             });
                         } else {
                             game.attempts++;
                             if (game.attempts >= 3) {
                                 gameStates.tebakLirik.delete(sender);
                                 await sock.sendMessage(sender, { 
-                                    text: `💀 *GAME OVER!*\n\nLirik yang benar:\n"${game.line}"\n"${game.answer}"\n\n💡 Ketik .tebaklirik untuk bermain lagi` 
+                                    text: `💀 *GAME OVER!*\n\nLirik yang benar:\n"${game.lyric}"\n"${game.answer}"\n\nLagu: ${game.song_title}\nArtis: ${game.artist}\n\n💡 Ketik .tebaklirik untuk bermain lagi` 
                                 });
                             } else {
                                 await sock.sendMessage(sender, { 
@@ -1525,7 +2137,7 @@ async function startBot() {
                                 updateLeaderboard(userId, 25, isGroup ? sender : null);
                                 
                                 await sock.sendMessage(sender, { 
-                                    text: `⚡ *PERTAMA BENAR!*\n\n🎉 ${pushName} menang!\n💰 +${coinsEarned} koin\n🏆 +25 poin leaderboard\n\nSoal: ${game.question} = ${game.answer}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
+                                    text: `⚡ *PERTAMA BENAR!*\n\n🎉 ${pushName} menang!\n💰 +${coinsEarned} koin\n🏆 +25 poin leaderboard\n\nSoal: ${game.expression} = ${game.answer}\nKesulitan: ${game.difficulty}\nWaktu: ${Math.floor((Date.now() - game.startTime) / 1000)} detik` 
                                 });
                             }
                         }
@@ -1554,18 +2166,19 @@ async function startBot() {
                             continue;
                         }
                         
-                        const botChoice = choices[Math.floor(Math.random() * 3)];
+                        const game = gameStates.suitGames.get(sender);
+                        const botChoice = game.choices[Math.floor(Math.random() * 3)];
                         let result = '';
                         let coinsEarned = 0;
                         
                         // Determine winner
-                        if (choice === botChoice) {
+                        if (choice === botChoice.name) {
                             result = '🤝 *SERI!*';
                             coinsEarned = 10;
                         } else if (
-                            (choice === 'batu' && botChoice === 'gunting') ||
-                            (choice === 'gunting' && botChoice === 'kertas') ||
-                            (choice === 'kertas' && botChoice === 'batu')
+                            (choice === 'batu' && botChoice.name === 'gunting') ||
+                            (choice === 'gunting' && botChoice.name === 'kertas') ||
+                            (choice === 'kertas' && botChoice.name === 'batu')
                         ) {
                             result = '🎉 *KAMU MENANG!*';
                             coinsEarned = 50;
@@ -1582,7 +2195,7 @@ async function startBot() {
                         await sock.sendMessage(sender, { 
                             text: `✂️ *HASIL SUIT*\n\n` +
                                   `Kamu: ${emojiMap[choice]} (${choice})\n` +
-                                  `Bot: ${emojiMap[botChoice]} (${botChoice})\n\n` +
+                                  `Bot: ${emojiMap[botChoice.name]} (${botChoice.name})\n\n` +
                                   `${result}\n` +
                                   `💰 +${coinsEarned} koin\n\n` +
                                   `💡 Ketik .suit untuk main lagi` 
@@ -1601,9 +2214,9 @@ async function startBot() {
                         const game = gameStates.tebakAngka.get(sender);
                         const userAnswer = parseInt(text.trim());
                         
-                        if (isNaN(userAnswer)) {
+                        if (isNaN(userAnswer) || userAnswer < 1 || userAnswer > 100) {
                             await sock.sendMessage(sender, { 
-                                text: '❌ Masukkan angka yang valid!' 
+                                text: '❌ Masukkan angka 1-100 yang valid!' 
                             });
                             continue;
                         }
@@ -1619,10 +2232,10 @@ async function startBot() {
                             await sock.sendMessage(sender, { 
                                 text: `🎉 *BENAR!*\n\nAngka: ${game.answer}\nTebakan: ${game.attempts}x\n💰 +${coinsEarned} koin\n🏆 +30 poin leaderboard\n\nKamu jenius! 🧠` 
                             });
-                        } else if (game.attempts >= 10) {
+                        } else if (game.attempts >= game.maxAttempts) {
                             gameStates.tebakAngka.delete(sender);
                             await sock.sendMessage(sender, { 
-                                text: `💀 *GAME OVER!*\n\nAngka yang benar: ${game.answer}\n\n💡 Ketik .tebakangka untuk bermain lagi` 
+                                text: `💀 *GAME OVER!*\n\nAngka yang benar: ${game.answer}\nTebakan: ${game.attempts}x\n\n💡 Ketik .tebakangka untuk bermain lagi` 
                             });
                         } else {
                             let clue = '';
@@ -1635,10 +2248,49 @@ async function startBot() {
                             }
                             
                             await sock.sendMessage(sender, { 
-                                text: `❌ ${clue}\n\nRange: ${game.min}-${game.max}\nTebakan: ${game.attempts}/10\n\nCoba lagi!` 
+                                text: `❌ ${clue}\n\nRange: ${game.min}-${game.max}\nTebakan: ${game.attempts}/${game.maxAttempts}\n\nCoba lagi!` 
                             });
                         }
                         continue;
+                    }
+                    
+                    // ==================== WEREWOLF GAME ====================
+                    if (command === '.ww' || command === '.werewolf') {
+                        const subcommand = args[0]?.toLowerCase();
+                        
+                        if (!subcommand) {
+                            await sock.sendMessage(sender, { 
+                                text: '🐺 *WEREWOLF GAME*\n\n.perintah:\n.ww start - Mulai game\n.ww vote @player - Voting\n.ww kill @player - Kill (werewolf only)\n.ww roles - Lihat role\n.ww end - Akhiri game' 
+                            });
+                            continue;
+                        }
+                        
+                        if (subcommand === 'start') {
+                            await startWerewolf(sock, sender, pushName);
+                            continue;
+                        }
+                        
+                        if (subcommand === 'roles') {
+                            if (!gameStates.werewolfGames.has(sender)) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Tidak ada game Werewolf aktif!' 
+                                });
+                                continue;
+                            }
+                            
+                            const game = gameStates.werewolfGames.get(sender);
+                            const rolesText = game.players.map(player => {
+                                const role = game.roles[player];
+                                const status = game.alive.includes(player) ? '❤️ Hidup' : '💀 Mati';
+                                return `@${player.split('@')[0]} - ${role.name} (${status})`;
+                            }).join('\n');
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `🐺 *PLAYER ROLES*\n\n${rolesText}\n\nHari: ${game.day}`,
+                                mentions: game.players
+                            });
+                            continue;
+                        }
                     }
                     
                     // ==================== RPG SYSTEM ====================
@@ -1659,7 +2311,8 @@ async function startBot() {
                             `❤️ HP: ${profile.hp}/${profile.maxHp}\n` +
                             `⚔️ Attack: ${profile.attack}\n` +
                             `🛡️ Defense: ${profile.defense}\n` +
-                            `💰 Koin: ${coins}\n\n` +
+                            `💰 Koin: ${coins}\n` +
+                            `📅 Dibuat: ${new Date(profile.created).toLocaleDateString('id-ID')}\n\n` +
                             '📦 Inventory:\n' +
                             (inventory.length > 0 ? inventory.map(i => `- ${i}`).join('\n') : 'Kosong') +
                             '\n\n━━━━━━━━━━━━━━━━━━━━\n' +
@@ -1674,20 +2327,18 @@ async function startBot() {
                         const cooldown = checkCooldown(userId, 'daily');
                         
                         if (cooldown.onCooldown) {
-                            const hours = Math.floor(cooldown.remaining / (60 * 60 * 1000));
-                            const minutes = Math.floor((cooldown.remaining % (60 * 60 * 1000)) / (60 * 1000));
-                            
                             await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa klaim daily lagi dalam:\n${hours} jam ${minutes} menit` 
+                                text: `⏳ *COOLDOWN!*\n\nKamu bisa klaim daily lagi dalam:\n${formatTime(cooldown.remaining)}` 
                             });
                             continue;
                         }
                         
+                        const profile = getRPGProfile(userId);
                         const coinsEarned = 500 + profile.level * 50;
                         addCoins(userId, coinsEarned);
                         
                         await sock.sendMessage(sender, { 
-                            text: `🎁 *DAILY REWARD!*\n\n💰 +${coinsEarned} koin\n\n━━━━━━━━━━━━━━━━━━━━\nKembali besok untuk hadiah lebih besar!` 
+                            text: `🎁 *DAILY REWARD!*\n\n💰 +${coinsEarned} koin\n\n━━━━━━━━━━━━━━━━━━━━\nKembali besok untuk hadiah lebih besar!\n💰 Total koin: ${getCoins(userId)}` 
                         });
                         continue;
                     }
@@ -1697,10 +2348,8 @@ async function startBot() {
                         const cooldown = checkCooldown(userId, 'work');
                         
                         if (cooldown.onCooldown) {
-                            const minutes = Math.floor(cooldown.remaining / (60 * 1000));
-                            
                             await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa kerja lagi dalam:\n${minutes} menit` 
+                                text: `⏳ *COOLDOWN!*\n\nKamu bisa kerja lagi dalam:\n${formatTime(cooldown.remaining)}` 
                             });
                             continue;
                         }
@@ -1718,7 +2367,7 @@ async function startBot() {
                         addCoins(userId, coinsEarned);
                         
                         await sock.sendMessage(sender, { 
-                            text: `💼 *BEKERJA*\n\nPekerjaan: ${job.name}\n💰 +${coinsEarned} koin\n\n━━━━━━━━━━━━━━━━━━━━\nKembali bekerja dalam 5 menit!` 
+                            text: `💼 *BEKERJA*\n\nPekerjaan: ${job.name}\n💰 +${coinsEarned} koin\n💰 Total: ${getCoins(userId)}\n\n━━━━━━━━━━━━━━━━━━━━\nKembali bekerja dalam 5 menit!` 
                         });
                         continue;
                     }
@@ -1728,10 +2377,8 @@ async function startBot() {
                         const cooldown = checkCooldown(userId, 'hunt');
                         
                         if (cooldown.onCooldown) {
-                            const minutes = Math.floor(cooldown.remaining / (60 * 1000));
-                            
                             await sock.sendMessage(sender, { 
-                                text: `⏳ *COOLDOWN!*\n\nKamu bisa berburu lagi dalam:\n${minutes} menit` 
+                                text: `⏳ *COOLDOWN!*\n\nKamu bisa berburu lagi dalam:\n${formatTime(cooldown.remaining)}` 
                             });
                             continue;
                         }
@@ -1758,55 +2405,74 @@ async function startBot() {
                         }
                         
                         await sock.sendMessage(sender, { 
-                            text: `🏹 *BERBURU*\n\nKamu berhasil menangkap: ${hunt.item}\n💰 +${coinsEarned} koin\n⭐ +${expEarned} EXP${levelUpText}\n\n━━━━━━━━━━━━━━━━━━━━\nKembali berburu dalam 10 menit!` 
+                            text: `🏹 *BERBURU*\n\nKamu berhasil menangkap: ${hunt.item}\n💰 +${coinsEarned} koin\n⭐ +${expEarned} EXP\n💰 Total: ${getCoins(userId)}${levelUpText}\n\n━━━━━━━━━━━━━━━━━━━━\nKembali berburu dalam 10 menit!` 
                         });
                         continue;
                     }
                     
                     // SHOP
                     if (command === '.shop') {
-                        const shopText = 
-                            '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                            '┃ 🛒 *TOKO ITEM* 🛒 ┃\n' +
-                            '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            'Gunakan: .beli [nomor]\n\n' +
-                            gameData.shopItems.map(item => 
-                                `${item.id}. ${item.name} - 💰 ${item.price} koin`
-                            ).join('\n') +
-                            '\n\n━━━━━━━━━━━━━━━━━━━━\n' +
-                            '💡 Contoh: .beli 1';
-                        
-                        await sock.sendMessage(sender, { text: shopText });
+                        try {
+                            const items = await getGameData('rpg_items');
+                            
+                            const shopText = 
+                                '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
+                                '┃ 🛒 *TOKO ITEM* 🛒 ┃\n' +
+                                '┃   (API Powered)    ┃\n' +
+                                '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
+                                '💰 Koin kamu: ' + getCoins(userId) + '\n\n' +
+                                'Gunakan: .beli [nomor]\n\n' +
+                                items.map(item => 
+                                    `${item.id}. ${item.name} - 💰 ${item.price} koin`
+                                ).join('\n') +
+                                '\n\n━━━━━━━━━━━━━━━━━━━━\n' +
+                                '💡 Contoh: .beli 1';
+                            
+                            await sock.sendMessage(sender, { text: shopText });
+                        } catch (error) {
+                            console.error('Error getting shop items:', error);
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Gagal memuat toko. Coba lagi nanti!' 
+                            });
+                        }
                         continue;
                     }
                     
                     // BELI ITEM
                     if (command === '.beli' && args[0]) {
-                        const itemId = parseInt(args[0]);
-                        const item = gameData.shopItems.find(i => i.id === itemId);
-                        
-                        if (!item) {
+                        try {
+                            const itemId = parseInt(args[0]);
+                            const items = await getGameData('rpg_items');
+                            const item = items.find(i => i.id === itemId);
+                            
+                            if (!item) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Item tidak ditemukan!' 
+                                });
+                                continue;
+                            }
+                            
+                            const coins = getCoins(userId);
+                            
+                            if (coins < item.price) {
+                                await sock.sendMessage(sender, { 
+                                    text: `❌ Koin tidak cukup!\n\nKoin kamu: ${coins}\nHarga: ${item.price}` 
+                                });
+                                continue;
+                            }
+                            
+                            deductCoins(userId, item.price);
+                            addToInventory(userId, item.name);
+                            
                             await sock.sendMessage(sender, { 
-                                text: '❌ Item tidak ditemukan!' 
+                                text: `✅ *PEMBELIAN BERHASIL!*\n\nItem: ${item.name}\n💰 -${item.price} koin\n💰 Sisa: ${getCoins(userId)}\n\n📦 Item telah ditambahkan ke inventory!` 
                             });
-                            continue;
-                        }
-                        
-                        const coins = getCoins(userId);
-                        
-                        if (coins < item.price) {
+                        } catch (error) {
+                            console.error('Error buying item:', error);
                             await sock.sendMessage(sender, { 
-                                text: `❌ Koin tidak cukup!\n\nKoin kamu: ${coins}\nHarga: ${item.price}` 
+                                text: '❌ Gagal membeli item. Coba lagi nanti!' 
                             });
-                            continue;
                         }
-                        
-                        deductCoins(userId, item.price);
-                        addToInventory(userId, item.name);
-                        
-                        await sock.sendMessage(sender, { 
-                            text: `✅ *PEMBELIAN BERHASIL!*\n\nItem: ${item.name}\n💰 -${item.price} koin\n\n📦 Item telah ditambahkan ke inventory!` 
-                        });
                         continue;
                     }
                     
@@ -1818,7 +2484,8 @@ async function startBot() {
                             '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
                             '┃ 📦 *INVENTORY* 📦 ┃\n' +
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
-                            `Total item: ${inventory.length}\n\n` +
+                            `💰 Koin: ${getCoins(userId)}\n` +
+                            `📊 Total item: ${inventory.length}\n\n` +
                             (inventory.length > 0 ? 
                                 inventory.map((item, idx) => `${idx + 1}. ${item}`).join('\n') : 
                                 'Inventory kosong') +
@@ -1831,6 +2498,15 @@ async function startBot() {
                     
                     // ==================== SPIN/GACHA ====================
                     if (command === '.spin' || command === '.gacha') {
+                        const cooldown = checkCooldown(userId, 'spin');
+                        
+                        if (cooldown.onCooldown) {
+                            await sock.sendMessage(sender, { 
+                                text: `⏳ *COOLDOWN!*\n\nKamu bisa spin lagi dalam:\n${formatTime(cooldown.remaining)}` 
+                            });
+                            continue;
+                        }
+                        
                         const spinCost = 100;
                         const coins = getCoins(userId);
                         
@@ -1847,53 +2523,61 @@ async function startBot() {
                         await sock.sendMessage(sender, { text: '🎰 *SPINNING...*' });
                         await new Promise(resolve => setTimeout(resolve, 2000));
                         
-                        const items = gameData.gachaItems;
-                        const weights = {
-                            'common': 40,
-                            'rare': 30,
-                            'epic': 20,
-                            'legendary': 10
-                        };
-                        
-                        const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
-                        let random = Math.random() * totalWeight;
-                        let selectedRarity = '';
-                        
-                        for (const [rarity, weight] of Object.entries(weights)) {
-                            random -= weight;
-                            if (random <= 0) {
-                                selectedRarity = rarity;
-                                break;
+                        try {
+                            const items = await getGameData('gacha_items');
+                            const weights = {
+                                'common': 40,
+                                'rare': 30,
+                                'epic': 20,
+                                'legendary': 10
+                            };
+                            
+                            const totalWeight = Object.values(weights).reduce((a, b) => a + b, 0);
+                            let random = Math.random() * totalWeight;
+                            let selectedRarity = '';
+                            
+                            for (const [rarity, weight] of Object.entries(weights)) {
+                                random -= weight;
+                                if (random <= 0) {
+                                    selectedRarity = rarity;
+                                    break;
+                                }
                             }
+                            
+                            const rareItems = items.filter(item => item.rarity === selectedRarity);
+                            const wonItem = rareItems[Math.floor(Math.random() * rareItems.length)];
+                            
+                            let rewardText = '';
+                            if (wonItem.value) {
+                                addCoins(userId, wonItem.value);
+                                rewardText = `💰 +${wonItem.value} koin`;
+                            } else {
+                                addToInventory(userId, wonItem.name);
+                                rewardText = `📦 ${wonItem.name}`;
+                            }
+                            
+                            const rarityEmoji = {
+                                'common': '⚪',
+                                'rare': '🔵',
+                                'epic': '🟣',
+                                'legendary': '🟡'
+                            };
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `🎰 *SPIN RESULT!*\n\n` +
+                                      `${rarityEmoji[selectedRarity]} *${selectedRarity.toUpperCase()}* ${rarityEmoji[selectedRarity]}\n\n` +
+                                      `🎁 Hadiah: ${wonItem.name}\n` +
+                                      `${rewardText}\n` +
+                                      `💰 Total koin: ${getCoins(userId)}\n\n` +
+                                      `━━━━━━━━━━━━━━━━━━━━\n` +
+                                      `💡 Spin lagi? .spin` 
+                            });
+                        } catch (error) {
+                            console.error('Error spinning:', error);
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Gagal memutar spin. Coba lagi nanti!' 
+                            });
                         }
-                        
-                        const rareItems = items.filter(item => item.rarity === selectedRarity);
-                        const wonItem = rareItems[Math.floor(Math.random() * rareItems.length)];
-                        
-                        let rewardText = '';
-                        if (wonItem.value) {
-                            addCoins(userId, wonItem.value);
-                            rewardText = `💰 +${wonItem.value} koin`;
-                        } else {
-                            addToInventory(userId, wonItem.name);
-                            rewardText = `📦 ${wonItem.name}`;
-                        }
-                        
-                        const rarityEmoji = {
-                            'common': '⚪',
-                            'rare': '🔵',
-                            'epic': '🟣',
-                            'legendary': '🟡'
-                        };
-                        
-                        await sock.sendMessage(sender, { 
-                            text: `🎰 *SPIN RESULT!*\n\n` +
-                                  `${rarityEmoji[selectedRarity]} *${selectedRarity.toUpperCase()}* ${rarityEmoji[selectedRarity]}\n\n` +
-                                  `🎁 Hadiah: ${wonItem.name}\n` +
-                                  `${rewardText}\n\n` +
-                                  `━━━━━━━━━━━━━━━━━━━━\n` +
-                                  `💡 Spin lagi? .spin` 
-                        });
                         continue;
                     }
                     
@@ -1916,22 +2600,33 @@ async function startBot() {
                             continue;
                         }
                         
-                        deductCoins(userId, adoptCost);
-                        const pet = gameData.petTypes[Math.floor(Math.random() * gameData.petTypes.length)];
-                        
-                        gameStates.petProfiles.set(userId, {
-                            name: pet.name,
-                            type: pet.type,
-                            level: 1,
-                            exp: 0,
-                            happiness: 100,
-                            lastFed: Date.now(),
-                            lastTrained: 0
-                        });
-                        
-                        await sock.sendMessage(sender, { 
-                            text: `🐾 *ADOPT SUKSES!*\n\nKamu mengadopsi: ${pet.name}\n💰 -${adoptCost} koin\n\n💡 Rawat pet-mu dengan:\n.feed - Kasih makan\n.train - Latih pet\n.pet - Lihat status pet` 
-                        });
+                        try {
+                            const pets = await getGameData('pet_types');
+                            const pet = pets[Math.floor(Math.random() * pets.length)];
+                            
+                            deductCoins(userId, adoptCost);
+                            
+                            gameStates.petProfiles.set(userId, {
+                                name: pet.name,
+                                type: pet.type,
+                                rarity: pet.rarity,
+                                level: 1,
+                                exp: 0,
+                                happiness: 100,
+                                lastFed: Date.now(),
+                                lastTrained: 0,
+                                adopted: Date.now()
+                            });
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `🐾 *ADOPT SUKSES!*\n\nKamu mengadopsi: ${pet.name}\n⭐ Rarity: ${pet.rarity}\n💰 -${adoptCost} koin\n💰 Sisa: ${getCoins(userId)}\n\n💡 Rawat pet-mu dengan:\n.feed - Kasih makan\n.train - Latih pet\n.pet - Lihat status pet` 
+                            });
+                        } catch (error) {
+                            console.error('Error adopting pet:', error);
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Gagal mengadopsi pet. Coba lagi nanti!' 
+                            });
+                        }
                         continue;
                     }
                     
@@ -1956,9 +2651,11 @@ async function startBot() {
                             '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                             `Nama: ${pet.name}\n` +
                             `Tipe: ${pet.type}\n` +
-                            `⭐ Level: ${pet.level}\n` +
+                            `⭐ Rarity: ${pet.rarity}\n` +
+                            `📊 Level: ${pet.level}\n` +
                             `📈 EXP: ${pet.exp}/${pet.level * 100}\n` +
-                            `😊 Happiness: ${pet.happiness}/100\n\n` +
+                            `😊 Happiness: ${pet.happiness}/100\n` +
+                            `📅 Diadopsi: ${new Date(pet.adopted).toLocaleDateString('id-ID')}\n\n` +
                             '━━━━━━━━━━━━━━━━━━━━\n' +
                             '💡 Perintah:\n' +
                             '.feed - Kasih makan (+10 happiness)\n' +
@@ -1978,11 +2675,22 @@ async function startBot() {
                         }
                         
                         const pet = gameStates.petProfiles.get(userId);
+                        const feedCost = 10;
+                        const coins = getCoins(userId);
+                        
+                        if (coins < feedCost) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Koin tidak cukup!\n\nKoin kamu: ${coins}\nBiaya feed: ${feedCost}` 
+                            });
+                            continue;
+                        }
+                        
+                        deductCoins(userId, feedCost);
                         pet.lastFed = Date.now();
                         pet.happiness = Math.min(100, pet.happiness + 10);
                         
                         await sock.sendMessage(sender, { 
-                            text: `🍗 *FEED PET*\n\n${pet.name} sudah diberi makan!\n😊 Happiness: +10\n\n💡 Happiness sekarang: ${pet.happiness}/100` 
+                            text: `🍗 *FEED PET*\n\n${pet.name} sudah diberi makan!\n😊 Happiness: +10\n💰 -${feedCost} koin\n💰 Sisa: ${getCoins(userId)}\n\n💡 Happiness sekarang: ${pet.happiness}/100` 
                         });
                         continue;
                     }
@@ -2036,7 +2744,7 @@ async function startBot() {
                         } else {
                             top.forEach(([userId, points], index) => {
                                 const medal = index === 0 ? '🥇' : index === 1 ? '🥈' : index === 2 ? '🥉' : `${index + 1}.`;
-                                leaderboardText += `${medal} ${userId.split('@')[0]} - ${points} poin\n`;
+                                leaderboardText += `${medal} @${userId.split('@')[0]} - ${points} poin\n`;
                             });
                         }
                         
@@ -2111,6 +2819,7 @@ async function startBot() {
                             `┃ ⚡ ${end - start}ms\n` +
                             '┃ 📶 Online\n' +
                             `┃ ⏰ ${formatRuntime(Date.now() - BOT_START_TIME)}\n` +
+                            `┃ 🌐 API: ${GAME_API_BASE}\n` +
                             '┗━━━━━━━━━━━━━━━━┛';
                         
                         await sock.sendMessage(sender, { text: pingText, edit: sent.key });
@@ -2125,7 +2834,8 @@ async function startBot() {
                             `┃ 🤖 ${BOT_NAME}\n` +
                             `┃ ⏱️ ${formatRuntime(Date.now() - BOT_START_TIME)}\n` +
                             `┃ 📅 ${new Date(BOT_START_TIME).toLocaleString('id-ID')}\n` +
-                            `┃ 🎮 Games: 15+\n` +
+                            `┃ 🎮 Game Mode: Dynamic API\n` +
+                            `┃ 🌐 API: ${GAME_API_BASE}\n` +
                             `┃ 💰 Coin System: Active\n` +
                             '┗━━━━━━━━━━━━━━━━┛';
                         
