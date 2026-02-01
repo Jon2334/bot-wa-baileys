@@ -65,12 +65,12 @@ if (ANTI_VIEWONCE_ENABLED && !fs.existsSync(VIEWONCE_SAVE_FOLDER)) {
     fs.mkdirSync(VIEWONCE_SAVE_FOLDER, { recursive: true });
 }
 
-// 🌟 CONFIG BALAS OTOMATIS VIEWONCE
-const AUTO_REPLY_VIEWONCE = true; // Aktifkan balas otomatis
+// 🌟 CONFIG BALAS OTOMATIS VIEWONCE - PAKAI LET AGAR BISA DIUBAH
+let AUTO_REPLY_VIEWONCE = true; // Aktifkan balas otomatis
 const AUTO_REPLY_TEXT = "🚨 *VIEW ONCE DETECTED!*\nSaya telah menyimpan dan menampilkan isi pesan ini:";
-const AUTO_REPLY_IN_GROUP = true; // Balas di grup
-const AUTO_REPLY_IN_PRIVATE = true; // Balas di chat pribadi
-const AUTO_REPLY_AS_QUOTE = true; // Balas sebagai reply ke pesan asli
+let AUTO_REPLY_IN_GROUP = true; // Balas di grup
+let AUTO_REPLY_IN_PRIVATE = true; // Balas di chat pribadi
+let AUTO_REPLY_AS_QUOTE = true; // Balas sebagai reply ke pesan asli
 
 const reactions = ['❤️', '👍', '🔥', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯', '✨', '⚡', '💪', '🤝', '🌟'];
 
@@ -420,6 +420,7 @@ async function saveViewOnceMedia(sock, m) {
                 try {
                     mediaBuffer = await downloadMediaMessage(viewOnceContent.imageMessage, 'image');
                     caption = viewOnceContent.imageMessage.caption || '';
+                    console.log(`📸 ViewOnce Image detected: ${caption.substring(0, 50)}`);
                 } catch (error) {
                     console.error('Error downloading view once image:', error.message);
                     return;
@@ -432,6 +433,7 @@ async function saveViewOnceMedia(sock, m) {
                 try {
                     mediaBuffer = await downloadMediaMessage(viewOnceContent.videoMessage, 'video');
                     caption = viewOnceContent.videoMessage.caption || '';
+                    console.log(`🎬 ViewOnce Video detected: ${caption.substring(0, 50)}`);
                 } catch (error) {
                     console.error('Error downloading view once video:', error.message);
                     return;
@@ -471,7 +473,7 @@ async function saveViewOnceMedia(sock, m) {
             });
             
             // 🌟 BALAS OTOMATIS DENGAN ISI VIEWONCE
-            if (AUTO_REPLY_VIEWONCE) {
+            if (ANTI_VIEWONCE_ENABLED && AUTO_REPLY_VIEWONCE) {
                 try {
                     // Cek apakah harus membalas di grup/private
                     const shouldReply = (isGroup && AUTO_REPLY_IN_GROUP) || 
@@ -479,6 +481,8 @@ async function saveViewOnceMedia(sock, m) {
                     
                     if (shouldReply) {
                         const replyText = `${AUTO_REPLY_TEXT}\n👤 Dari: ${senderName}\n⏰ ${new Date().toLocaleTimeString('id-ID')}\n💬 ${caption || 'Tanpa caption'}`;
+                        
+                        console.log(`🤖 Auto-replying to ${senderName} with ${mediaType}`);
                         
                         // Kirim balasan berdasarkan tipe media
                         if (mediaType === 'image') {
