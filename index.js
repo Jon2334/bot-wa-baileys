@@ -65,6 +65,13 @@ if (ANTI_VIEWONCE_ENABLED && !fs.existsSync(VIEWONCE_SAVE_FOLDER)) {
     fs.mkdirSync(VIEWONCE_SAVE_FOLDER, { recursive: true });
 }
 
+// 🌟 CONFIG BALAS OTOMATIS VIEWONCE
+const AUTO_REPLY_VIEWONCE = true; // Aktifkan balas otomatis
+const AUTO_REPLY_TEXT = "🚨 *VIEW ONCE DETECTED!*\nSaya telah menyimpan dan menampilkan isi pesan ini:";
+const AUTO_REPLY_IN_GROUP = true; // Balas di grup
+const AUTO_REPLY_IN_PRIVATE = true; // Balas di chat pribadi
+const AUTO_REPLY_AS_QUOTE = true; // Balas sebagai reply ke pesan asli
+
 const reactions = ['❤️', '👍', '🔥', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯', '✨', '⚡', '💪', '🤝', '🌟'];
 
 // Utility Functions
@@ -361,7 +368,7 @@ async function convertStickerToImage(stickerBuffer) {
     }
 }
 
-// 🌟 ANTI VIEWONCE FUNCTION - PERBAIKAN
+// 🌟 ANTI VIEWONCE FUNCTION - DIPERBAIKI DENGAN BALAS OTOMATIS
 async function saveViewOnceMedia(sock, m) {
     try {
         if (!m.message) return;
@@ -370,6 +377,9 @@ async function saveViewOnceMedia(sock, m) {
         const sender = m.key.remoteJid;
         const senderName = m.pushName || 'Unknown';
         const messageId = m.key.id;
+        const isGroup = sender.endsWith('@g.us');
+        const userId = m.key.participant || sender;
+        const isOwner = userId === OWNER_JID;
         
         // Cek apakah ini pesan viewOnce
         const isViewOnce = 
@@ -456,8 +466,49 @@ async function saveViewOnceMedia(sock, m) {
                 filePath,
                 caption,
                 buffer: mediaBuffer,
-                saved: true
+                saved: true,
+                messageKey: m.key
             });
+            
+            // 🌟 BALAS OTOMATIS DENGAN ISI VIEWONCE
+            if (AUTO_REPLY_VIEWONCE) {
+                try {
+                    // Cek apakah harus membalas di grup/private
+                    const shouldReply = (isGroup && AUTO_REPLY_IN_GROUP) || 
+                                      (!isGroup && AUTO_REPLY_IN_PRIVATE);
+                    
+                    if (shouldReply) {
+                        const replyText = `${AUTO_REPLY_TEXT}\n👤 Dari: ${senderName}\n⏰ ${new Date().toLocaleTimeString('id-ID')}\n💬 ${caption || 'Tanpa caption'}`;
+                        
+                        // Kirim balasan berdasarkan tipe media
+                        if (mediaType === 'image') {
+                            await sock.sendMessage(sender, {
+                                image: mediaBuffer,
+                                caption: replyText,
+                                ...(AUTO_REPLY_AS_QUOTE && { quoted: m })
+                            });
+                            console.log(`✅ Auto-replied with image viewonce to ${senderName}`);
+                        } else if (mediaType === 'video') {
+                            await sock.sendMessage(sender, {
+                                video: mediaBuffer,
+                                caption: replyText,
+                                ...(AUTO_REPLY_AS_QUOTE && { quoted: m })
+                            });
+                            console.log(`✅ Auto-replied with video viewonce to ${senderName}`);
+                        }
+                        
+                        // Tambahkan reaksi untuk konfirmasi
+                        await sock.sendMessage(sender, {
+                            react: {
+                                text: '✅',
+                                key: m.key
+                            }
+                        });
+                    }
+                } catch (replyError) {
+                    console.error('❌ Error auto-replying viewonce:', replyError.message);
+                }
+            }
             
             // Kirim notifikasi ke owner
             if (sender !== OWNER_JID) {
@@ -467,7 +518,8 @@ async function saveViewOnceMedia(sock, m) {
                     `📞 Number: ${sender.split('@')[0]}\n` +
                     `📁 Type: ${mediaType.toUpperCase()}\n` +
                     `⏰ Time: ${new Date().toLocaleTimeString('id-ID')}\n` +
-                    `💬 Caption: ${caption || 'No caption'}`;
+                    `💬 Caption: ${caption || 'No caption'}\n\n` +
+                    `📍 ${isGroup ? 'Group' : 'Private Chat'}`;
                 
                 try {
                     await sock.sendMessage(OWNER_JID, { text: notif });
@@ -637,6 +689,34 @@ app.get('/', (req, res) => {
                     text-decoration: none;
                     font-size: 12px;
                 }
+                .config-info {
+                    background: #f0f8ff;
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin: 15px 0;
+                    text-align: left;
+                }
+                .config-info h4 {
+                    color: #667eea;
+                    margin-bottom: 10px;
+                }
+                .config-item {
+                    display: flex;
+                    justify-content: space-between;
+                    padding: 5px 0;
+                    border-bottom: 1px solid #e0e0e0;
+                }
+                .config-item:last-child {
+                    border-bottom: none;
+                }
+                .status-on {
+                    color: #4CAF50;
+                    font-weight: bold;
+                }
+                .status-off {
+                    color: #f44336;
+                    font-weight: bold;
+                }
             </style>
         </head>
         <body>
@@ -664,6 +744,30 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
                 
+                <div class="config-info">
+                    <h4>🚨 Anti ViewOnce Configuration</h4>
+                    <div class="config-item">
+                        <span>Auto Reply ViewOnce:</span>
+                        <span class="${AUTO_REPLY_VIEWONCE ? 'status-on' : 'status-off'}">${AUTO_REPLY_VIEWONCE ? 'ACTIVE' : 'INACTIVE'}</span>
+                    </div>
+                    <div class="config-item">
+                        <span>Reply in Groups:</span>
+                        <span class="${AUTO_REPLY_IN_GROUP ? 'status-on' : 'status-off'}">${AUTO_REPLY_IN_GROUP ? 'YES' : 'NO'}</span>
+                    </div>
+                    <div class="config-item">
+                        <span>Reply in Private:</span>
+                        <span class="${AUTO_REPLY_IN_PRIVATE ? 'status-on' : 'status-off'}">${AUTO_REPLY_IN_PRIVATE ? 'YES' : 'NO'}</span>
+                    </div>
+                    <div class="config-item">
+                        <span>Reply as Quote:</span>
+                        <span class="${AUTO_REPLY_AS_QUOTE ? 'status-on' : 'status-off'}">${AUTO_REPLY_AS_QUOTE ? 'YES' : 'NO'}</span>
+                    </div>
+                    <div class="config-item">
+                        <span>Auto Reply Text:</span>
+                        <span>${AUTO_REPLY_TEXT.substring(0, 30)}...</span>
+                    </div>
+                </div>
+                
                 <div class="features">
                     <h3>✨ Featured Systems</h3>
                     <div class="feature-grid">
@@ -680,8 +784,8 @@ app.get('/', (req, res) => {
                             YT, TikTok, IG, etc.
                         </div>
                         <div class="feature-item">
-                            <strong>🚨 Anti ViewOnce</strong><br>
-                            Auto save & forward
+                            <strong>🚨 Auto Reply ViewOnce</strong><br>
+                            Save & reply automatically
                         </div>
                     </div>
                 </div>
@@ -742,6 +846,7 @@ app.get('/health', (req, res) => {
         games_available: 15,
         rpg_system: true,
         anti_viewonce: ANTI_VIEWONCE_ENABLED,
+        auto_reply_viewonce: AUTO_REPLY_VIEWONCE,
         viewonce_saved: viewOnceMessages.size,
         timestamp: new Date().toISOString()
     });
@@ -780,6 +885,7 @@ app.listen(PORT, () => {
     console.log(`📊 Health: http://localhost:${PORT}/health`);
     console.log(`🎮 ${BOT_NAME} v2.0 - 15+ Games Ready!`);
     console.log(`🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ACTIVE' : 'INACTIVE'}`);
+    console.log(`🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ACTIVE' : 'INACTIVE'}`);
 });
 
 // Main Bot Function
@@ -797,6 +903,7 @@ async function startBot() {
         console.log(`🎪 RPG System: Enabled`);
         console.log(`💾 Database: MongoDB`);
         console.log(`🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ENABLED' : 'DISABLED'}`);
+        console.log(`🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ENABLED' : 'DISABLED'}`);
 
         const sock = makeWASocket({
             version,
@@ -851,6 +958,7 @@ async function startBot() {
                 console.log('║  🎪 RPG System Active ✓                 ║');
                 console.log('║  📥 Downloader Updated ✓                ║');
                 console.log('║  🚨 Anti View Once Active ✓             ║');
+                console.log(`║  🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ACTIVE ✓' : 'INACTIVE'} ║`);
                 console.log('║  👥 Group Tools Ready ✓                 ║');
                 console.log('║  💾 MongoDB Connected ✓                 ║');
                 console.log('╚════════════════════════════════════════╝\n');
@@ -871,7 +979,8 @@ async function startBot() {
                         '🎮 15+ Games: Ready ✓\n' +
                         '🎪 RPG System: Active ✓\n' +
                         '📥 Downloader: Updated ✓\n' +
-                        '🚨 Anti View Once: Active ✓\n' +
+                        `🚨 Anti View Once: ${ANTI_VIEWONCE_ENABLED ? 'Active ✓' : 'Inactive'}\n` +
+                        `🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'Active ✓' : 'Inactive'}\n` +
                         '👥 Group Tools: Ready ✓\n' +
                         '💾 Database: MongoDB ✓\n' +
                         '━━━━━━━━━━━━━━━━━━━━';
@@ -1166,6 +1275,8 @@ async function startBot() {
                                 '┃ .viewonce list\n' +
                                 '┃ .viewonce send [id]\n' +
                                 '┃ .viewonce clear\n' +
+                                '┃ .viewonce forward [id]\n' +
+                                '┃ .autoreply [on/off]\n' +
                                 '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                                 '━━━━━━━━━━━━━━━━━━━━\n' +
                                 '👤 Owner: wa.me/' + OWNER_NUMBER + '\n' +
@@ -1181,6 +1292,37 @@ async function startBot() {
                     }
                     
                     // ==================== VIEW ONCE COMMANDS ====================
+                    
+                    // TOGGLE AUTO REPLY
+                    if (command === '.autoreply') {
+                        if (!isOwner) {
+                            await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa mengatur auto reply!' });
+                            continue;
+                        }
+                        
+                        const action = args[0];
+                        if (action === 'on') {
+                            AUTO_REPLY_VIEWONCE = true;
+                            await sock.sendMessage(sender, { 
+                                text: '✅ *Auto Reply ViewOnce diaktifkan!*\n\nBot akan membalas otomatis dengan isi viewonce.' 
+                            });
+                        } else if (action === 'off') {
+                            AUTO_REPLY_VIEWONCE = false;
+                            await sock.sendMessage(sender, { 
+                                text: '❌ *Auto Reply ViewOnce dinonaktifkan!*\n\nBot hanya akan menyimpan tanpa membalas.' 
+                            });
+                        } else if (action === 'status') {
+                            const status = AUTO_REPLY_VIEWONCE ? 'AKTIF ✅' : 'NONAKTIF ❌';
+                            await sock.sendMessage(sender, { 
+                                text: `📊 *Status Auto Reply ViewOnce*\n\nStatus: ${status}\n\nKonfigurasi:\n• Grup: ${AUTO_REPLY_IN_GROUP ? 'YA' : 'TIDAK'}\n• Private: ${AUTO_REPLY_IN_PRIVATE ? 'YA' : 'TIDAK'}\n• Quote: ${AUTO_REPLY_AS_QUOTE ? 'YA' : 'TIDAK'}` 
+                            });
+                        } else {
+                            await sock.sendMessage(sender, { 
+                                text: '⚙️ *Auto Reply ViewOnce*\n\nPenggunaan:\n• .autoreply on - Aktifkan\n• .autoreply off - Nonaktifkan\n• .autoreply status - Cek status' 
+                            });
+                        }
+                        continue;
+                    }
                     
                     // LIST VIEW ONCE
                     if (command === '.viewonce') {
@@ -1331,16 +1473,21 @@ async function startBot() {
                         }
                         
                         // FORWARD VIEW ONCE TO GROUP
-                        else if (subCommand === 'forward' && isGroup) {
+                        else if (subCommand === 'forward') {
                             if (!isOwner) {
                                 await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa forward viewonce!' });
+                                continue;
+                            }
+                            
+                            if (!isGroup) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya bisa di dalam grup!' });
                                 continue;
                             }
                             
                             const targetId = args[1];
                             if (!targetId) {
                                 await sock.sendMessage(sender, { 
-                                    text: '❌ Format: .viewonce forward [message_id]' 
+                                    text: '❌ Format: .viewonce forward [message_id]\n💡 Gunakan .viewonce list untuk melihat ID' 
                                 });
                                 continue;
                             }
@@ -1378,6 +1525,50 @@ async function startBot() {
                                     text: `❌ Gagal forward: ${error.message}` 
                                 });
                             }
+                            continue;
+                        }
+                        
+                        // GET VIEWONCE BY USER
+                        else if (subCommand === 'user') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa melihat viewonce by user!' });
+                                continue;
+                            }
+                            
+                            const targetUser = args[1];
+                            if (!targetUser) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Format: .viewonce user [nomor/username]\nContoh: .viewonce user 628123456789' 
+                                });
+                                continue;
+                            }
+                            
+                            const userViewonces = Array.from(viewOnceMessages.entries())
+                                .filter(([id, data]) => 
+                                    data.senderName.toLowerCase().includes(targetUser.toLowerCase()) ||
+                                    data.sender.includes(targetUser)
+                                );
+                            
+                            if (userViewonces.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: `❌ Tidak ditemukan viewonce dari ${targetUser}` 
+                                });
+                                continue;
+                            }
+                            
+                            let userText = `👤 *VIEW ONCE DARI ${targetUser}*\n\n`;
+                            userText += `📊 Total: ${userViewonces.length}\n\n`;
+                            
+                            userViewonces.slice(-10).reverse().forEach(([id, data], index) => {
+                                const time = new Date(data.timestamp).toLocaleTimeString('id-ID');
+                                userText += `${index + 1}. ${data.mediaType.toUpperCase()} (${time})\n`;
+                                userText += `   💬 ${data.caption || 'No caption'}\n`;
+                                userText += `   🔑 ID: ${id.substring(0, 8)}...\n\n`;
+                            });
+                            
+                            userText += `💡 Kirim: .viewonce send [ID]`;
+                            
+                            await sock.sendMessage(sender, { text: userText });
                             continue;
                         }
                     }
