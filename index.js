@@ -1,4 +1,4 @@
-// index.js - VERSION 2.0 WITH ANTI VIEWONCE FIX
+// index.js - VERSION 2.0 WITH 15+ GAMES & RPG SYSTEM
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
@@ -47,7 +47,7 @@ const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
 
 const BOT_NAME = 'Jonkris-Bot';
 const OWNER_NUMBER = '6289509158681';
-const OWNER_JID = '103066632216677@lid'; // Fixed format
+const OWNER_JID = '103066632216677@lid';
 
 const BOT_START_TIME = Date.now();
 
@@ -58,11 +58,9 @@ const welcomeEnabled = new Map();
 const messageStore = {};
 const viewOnceMessages = new Map();
 
-// 🌟 ANTI VIEWONCE CONFIG - PERBAIKAN
+// 🌟 ANTI VIEWONCE CONFIG
 const ANTI_VIEWONCE_ENABLED = true;
 const VIEWONCE_SAVE_FOLDER = './viewonce_saved';
-const VIEWONCE_AUTO_SEND = true; // Kirim otomatis ke owner
-
 if (ANTI_VIEWONCE_ENABLED && !fs.existsSync(VIEWONCE_SAVE_FOLDER)) {
     fs.mkdirSync(VIEWONCE_SAVE_FOLDER, { recursive: true });
 }
@@ -363,7 +361,7 @@ async function convertStickerToImage(stickerBuffer) {
     }
 }
 
-// 🌟 ANTI VIEWONCE FUNCTION - FIXED VERSION
+// 🌟 ANTI VIEWONCE FUNCTION - PERBAIKAN
 async function saveViewOnceMedia(sock, m) {
     try {
         if (!m.message) return;
@@ -373,149 +371,126 @@ async function saveViewOnceMedia(sock, m) {
         const senderName = m.pushName || 'Unknown';
         const messageId = m.key.id;
         
-        // Cek berbagai tipe viewonce message
-        let viewOnceContent = null;
-        let isViewOnce = false;
+        // Cek apakah ini pesan viewOnce
+        const isViewOnce = 
+            msg.viewOnceMessageV2 || 
+            msg.viewOnceMessageV2Extension || 
+            msg.viewOnceMessage ||
+            (msg.viewOnceMessageV2?.message) ||
+            (msg.viewOnceMessageV2Extension?.message) ||
+            (msg.viewOnceMessage?.message);
         
-        if (msg.viewOnceMessageV2) {
-            viewOnceContent = msg.viewOnceMessageV2.message;
-            isViewOnce = true;
-        } else if (msg.viewOnceMessageV2Extension) {
-            viewOnceContent = msg.viewOnceMessageV2Extension.message;
-            isViewOnce = true;
-        } else if (msg.viewOnceMessage) {
-            viewOnceContent = msg.viewOnceMessage.message;
-            isViewOnce = true;
-        }
+        if (!isViewOnce) return;
         
-        // Cek juga dari ephemeralMessage (kadang viewonce masuk sini)
-        if (!isViewOnce && msg.ephemeralMessage?.message?.viewOnceMessageV2) {
-            viewOnceContent = msg.ephemeralMessage.message.viewOnceMessageV2.message;
-            isViewOnce = true;
-        }
-        
-        if (!isViewOnce || !viewOnceContent) return;
-        
-        console.log(`🔍 [ANTI-VIEWONCE] Detected from ${senderName} (${sender})`);
+        console.log(`🔍 View Once message detected from ${senderName} (${sender})`);
         
         let mediaBuffer = null;
         let mediaType = null;
         let caption = '';
-        let fileName = '';
         let mimetype = '';
         
-        try {
+        // Ekstrak konten dari viewOnce
+        let viewOnceContent = null;
+        
+        if (msg.viewOnceMessageV2?.message) {
+            viewOnceContent = msg.viewOnceMessageV2.message;
+        } else if (msg.viewOnceMessageV2Extension?.message) {
+            viewOnceContent = msg.viewOnceMessageV2Extension.message;
+        } else if (msg.viewOnceMessage?.message) {
+            viewOnceContent = msg.viewOnceMessage.message;
+        } else {
+            viewOnceContent = msg;
+        }
+        
+        if (viewOnceContent) {
+            // Cek untuk image
             if (viewOnceContent.imageMessage) {
                 mediaType = 'image';
-                mimetype = 'image/jpeg';
-                console.log(`📷 [ANTI-VIEWONCE] Downloading image...`);
-                mediaBuffer = await downloadContentFromMessage(viewOnceContent.imageMessage, 'image');
-                caption = viewOnceContent.imageMessage.caption || '';
-                fileName = `viewonce_${Date.now()}_${sender.split('@')[0]}.jpg`;
-                
-            } else if (viewOnceContent.videoMessage) {
+                mimetype = viewOnceContent.imageMessage.mimetype || 'image/jpeg';
+                try {
+                    mediaBuffer = await downloadMediaMessage(viewOnceContent.imageMessage, 'image');
+                    caption = viewOnceContent.imageMessage.caption || '';
+                } catch (error) {
+                    console.error('Error downloading view once image:', error.message);
+                    return;
+                }
+            } 
+            // Cek untuk video
+            else if (viewOnceContent.videoMessage) {
                 mediaType = 'video';
-                mimetype = 'video/mp4';
-                console.log(`🎥 [ANTI-VIEWONCE] Downloading video...`);
-                mediaBuffer = await downloadContentFromMessage(viewOnceContent.videoMessage, 'video');
-                caption = viewOnceContent.videoMessage.caption || '';
-                fileName = `viewonce_${Date.now()}_${sender.split('@')[0]}.mp4`;
-                
-            } else {
-                console.log(`❓ [ANTI-VIEWONCE] Unknown media type`);
-                return;
+                mimetype = viewOnceContent.videoMessage.mimetype || 'video/mp4';
+                try {
+                    mediaBuffer = await downloadMediaMessage(viewOnceContent.videoMessage, 'video');
+                    caption = viewOnceContent.videoMessage.caption || '';
+                } catch (error) {
+                    console.error('Error downloading view once video:', error.message);
+                    return;
+                }
             }
-        } catch (downloadError) {
-            console.error(`❌ [ANTI-VIEWONCE] Download failed:`, downloadError.message);
-            return;
         }
         
-        if (!mediaBuffer) {
-            console.log(`❌ [ANTI-VIEWONCE] Empty buffer`);
-            return;
-        }
-        
-        // Convert stream to buffer if needed
-        let buffer;
-        if (Buffer.isBuffer(mediaBuffer)) {
-            buffer = mediaBuffer;
-        } else {
-            // If it's a stream, collect chunks
-            const chunks = [];
-            for await (const chunk of mediaBuffer) {
-                chunks.push(chunk);
-            }
-            buffer = Buffer.concat(chunks);
-        }
-        
-        // Simpan ke file (backup)
-        const filePath = path.join(VIEWONCE_SAVE_FOLDER, fileName);
-        try {
-            fs.writeFileSync(filePath, buffer);
-            console.log(`✅ [ANTI-VIEWONCE] Saved to: ${fileName}`);
-        } catch (saveError) {
-            console.error(`❌ [ANTI-VIEWONCE] Save failed:`, saveError.message);
-        }
-        
-        // Simpan ke memory
-        viewOnceMessages.set(messageId, {
-            sender,
-            senderName,
-            timestamp: Date.now(),
-            mediaType,
-            filePath,
-            caption,
-            buffer: buffer // Simpan buffer untuk dikirim nanti
-        });
-        
-        // 🚀 KIRIM KE OWNER (Fitur utama yang diminta)
-        if (VIEWONCE_AUTO_SEND && sender !== OWNER_JID) {
-            const notifText = 
-                `🚨 *VIEW ONCE CAPTURED!*\n\n` +
-                `👤 Dari: ${senderName}\n` +
-                `📞 Nomor: wa.me/${sender.split('@')[0]}\n` +
-                `📁 Tipe: ${mediaType.toUpperCase()}\n` +
-                `⏰ Waktu: ${new Date().toLocaleString('id-ID')}\n` +
-                `💬 Caption: ${caption || '-'}\n` +
-                `🆔 MsgID: ${messageId}`;
+        if (mediaBuffer && mediaType) {
+            const timestamp = Date.now();
+            const safeName = senderName.replace(/[^a-z0-9]/gi, '_').substring(0, 30);
+            const extension = mediaType === 'image' ? 
+                (mimetype.includes('png') ? 'png' : 'jpg') : 
+                (mimetype.includes('gif') ? 'gif' : 'mp4');
+            const fileName = `viewonce_${timestamp}_${safeName}.${extension}`;
+            const filePath = path.join(VIEWONCE_SAVE_FOLDER, fileName);
             
             try {
-                // Kirim notifikasi text
-                await sock.sendMessage(OWNER_JID, { text: notifText });
+                fs.writeFileSync(filePath, mediaBuffer);
+                console.log(`✅ View Once ${mediaType} saved: ${fileName}`);
+            } catch (error) {
+                console.error('Error saving view once file:', error.message);
+                return;
+            }
+            
+            // Simpan metadata
+            viewOnceMessages.set(messageId, {
+                sender,
+                senderName,
+                timestamp,
+                mediaType,
+                mimetype,
+                filePath,
+                caption,
+                buffer: mediaBuffer,
+                saved: true
+            });
+            
+            // Kirim notifikasi ke owner
+            if (sender !== OWNER_JID) {
+                const notif = 
+                    `🚨 *VIEW ONCE DETECTED!*\n\n` +
+                    `👤 From: ${senderName}\n` +
+                    `📞 Number: ${sender.split('@')[0]}\n` +
+                    `📁 Type: ${mediaType.toUpperCase()}\n` +
+                    `⏰ Time: ${new Date().toLocaleTimeString('id-ID')}\n` +
+                    `💬 Caption: ${caption || 'No caption'}`;
                 
-                // Kirim media (image atau video)
-                if (mediaType === 'image') {
-                    await sock.sendMessage(OWNER_JID, {
-                        image: buffer,
-                        caption: `📷 ViewOnce dari ${senderName}`,
-                        mimetype: mimetype
-                    });
-                } else if (mediaType === 'video') {
-                    await sock.sendMessage(OWNER_JID, {
-                        video: buffer,
-                        caption: `🎥 ViewOnce dari ${senderName}`,
-                        mimetype: mimetype,
-                        fileName: fileName
-                    });
-                }
-                
-                console.log(`✅ [ANTI-VIEWONCE] Sent to owner successfully`);
-                
-            } catch (sendError) {
-                console.error(`❌ [ANTI-VIEWONCE] Failed to send to owner:`, sendError.message);
-                
-                // Fallback: Kirim notifikasi error ke owner
                 try {
-                    await sock.sendMessage(OWNER_JID, { 
-                        text: `⚠️ Gagal mengirim media ViewOnce dari ${senderName}\nError: ${sendError.message}` 
-                    });
-                } catch (e) {}
+                    await sock.sendMessage(OWNER_JID, { text: notif });
+                    
+                    // Kirim media ke owner
+                    if (mediaType === 'image') {
+                        await sock.sendMessage(OWNER_JID, {
+                            image: mediaBuffer,
+                            caption: `🚨 View Once Image dari ${senderName}\n\n${caption || ''}`
+                        });
+                    } else if (mediaType === 'video') {
+                        await sock.sendMessage(OWNER_JID, {
+                            video: mediaBuffer,
+                            caption: `🚨 View Once Video dari ${senderName}\n\n${caption || ''}`
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error sending notification to owner:', error.message);
+                }
             }
         }
-        
     } catch (error) {
-        console.error(`❌ [ANTI-VIEWONCE] Major error:`, error.message);
-        console.error(error.stack);
+        console.error('❌ Anti View Once error:', error.message);
     }
 }
 
@@ -636,6 +611,32 @@ app.get('/', (req, res) => {
                     color: #666;
                     font-size: 14px;
                 }
+                .viewonce-list {
+                    background: #f8f9fa;
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin: 20px 0;
+                    max-height: 300px;
+                    overflow-y: auto;
+                }
+                .viewonce-item {
+                    padding: 10px;
+                    border-bottom: 1px solid #ddd;
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                }
+                .viewonce-item:last-child {
+                    border-bottom: none;
+                }
+                .download-btn {
+                    background: #667eea;
+                    color: white;
+                    padding: 5px 10px;
+                    border-radius: 5px;
+                    text-decoration: none;
+                    font-size: 12px;
+                }
             </style>
         </head>
         <body>
@@ -679,36 +680,46 @@ app.get('/', (req, res) => {
                             YT, TikTok, IG, etc.
                         </div>
                         <div class="feature-item">
-                            <strong>👥 Group Tools</strong><br>
-                            Welcome, tagall, etc.
+                            <strong>🚨 Anti ViewOnce</strong><br>
+                            Auto save & forward
                         </div>
                     </div>
                 </div>
                 
                 <div class="features">
-                    <h3>🎯 Available Games</h3>
-                    <div class="feature-grid">
-                        <div class="feature-item">1. Tebak Kata</div>
-                        <div class="feature-item">2. Tebak Gambar</div>
-                        <div class="feature-item">3. Quiz</div>
-                        <div class="feature-item">4. Truth or Dare</div>
-                        <div class="feature-item">5. Tebak Lagu</div>
-                        <div class="feature-item">6. Tebak Bendera</div>
-                        <div class="feature-item">7. Tebak Emoji</div>
-                        <div class="feature-item">8. Tebak Lirik</div>
-                        <div class="feature-item">9. Math Battle</div>
-                        <div class="feature-item">10. Suit</div>
-                        <div class="feature-item">11. Tebak Angka</div>
-                        <div class="feature-item">12. RPG System</div>
-                        <div class="feature-item">13. Spin/Gacha</div>
-                        <div class="feature-item">14. Pet Game</div>
-                        <div class="feature-item">15. Werewolf</div>
+                    <h3>🚨 View Once Saved Media (Latest 10)</h3>
+                    <div class="viewonce-list">
+                        ${(() => {
+                            try {
+                                const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
+                                    .filter(f => f.startsWith('viewonce_'))
+                                    .slice(-10)
+                                    .reverse()
+                                    .map(f => {
+                                        const stats = fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, f));
+                                        const size = (stats.size / 1024).toFixed(2);
+                                        return `
+                                            <div class="viewonce-item">
+                                                <div>
+                                                    <strong>${f}</strong><br>
+                                                    <small>${new Date(stats.mtime).toLocaleString('id-ID')} • ${size} KB</small>
+                                                </div>
+                                                <a href="/viewonce/files/${f}" class="download-btn" download>Download</a>
+                                            </div>
+                                        `;
+                                    }).join('');
+                                return files || '<p>No saved view once media yet</p>';
+                            } catch {
+                                return '<p>Folder not found</p>';
+                            }
+                        })()}
                     </div>
                 </div>
                 
                 <div class="footer">
                     👤 Owner: ${OWNER_NUMBER}<br>
                     🚀 Powered by Baileys & MongoDB<br>
+                    🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ACTIVE' : 'INACTIVE'}<br>
                     ⚡ Auto-refresh every 30 seconds
                 </div>
             </div>
@@ -730,6 +741,8 @@ app.get('/health', (req, res) => {
         uptime: formatRuntime(Date.now() - BOT_START_TIME),
         games_available: 15,
         rpg_system: true,
+        anti_viewonce: ANTI_VIEWONCE_ENABLED,
+        viewonce_saved: viewOnceMessages.size,
         timestamp: new Date().toISOString()
     });
 });
@@ -738,12 +751,17 @@ app.get('/viewonce', (req, res) => {
     try {
         const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
             .filter(f => f.startsWith('viewonce_'))
-            .map(f => ({
-                name: f,
-                path: `/viewonce/files/${f}`,
-                size: fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, f)).size,
-                time: fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, f)).mtime
-            }));
+            .map(f => {
+                const stats = fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, f));
+                return {
+                    name: f,
+                    path: `/viewonce/files/${f}`,
+                    size: (stats.size / 1024).toFixed(2) + ' KB',
+                    time: stats.mtime,
+                    date: new Date(stats.mtime).toLocaleString('id-ID')
+                };
+            })
+            .reverse();
         
         res.json({
             total: files.length,
@@ -761,6 +779,7 @@ app.listen(PORT, () => {
     console.log(`🌐 Dashboard: http://localhost:${PORT}`);
     console.log(`📊 Health: http://localhost:${PORT}/health`);
     console.log(`🎮 ${BOT_NAME} v2.0 - 15+ Games Ready!`);
+    console.log(`🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ACTIVE' : 'INACTIVE'}`);
 });
 
 // Main Bot Function
@@ -777,6 +796,7 @@ async function startBot() {
         console.log(`🎮 Games: 15+ available`);
         console.log(`🎪 RPG System: Enabled`);
         console.log(`💾 Database: MongoDB`);
+        console.log(`🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ENABLED' : 'DISABLED'}`);
 
         const sock = makeWASocket({
             version,
@@ -1014,13 +1034,9 @@ async function startBot() {
                     
                     if (!m.message) continue;
                     
-                    // 🚨 ANTI VIEWONCE HANDLER - PALING ATAS & PRIORITAS TINGGI
-                    if (ANTI_VIEWONCE_ENABLED && !m.key.fromMe) {
-                        try {
-                            await saveViewOnceMedia(sock, m);
-                        } catch (viewOnceError) {
-                            console.error('Anti-viewonce outer error:', viewOnceError.message);
-                        }
+                    // 🚨 ANTI VIEWONCE HANDLER - DIPANGGIL DI AWAL
+                    if (ANTI_VIEWONCE_ENABLED) {
+                        await saveViewOnceMedia(sock, m);
                     }
                     
                     // Auto reaction
@@ -1060,107 +1076,6 @@ async function startBot() {
                     
                     const command = text.toLowerCase().trim().split(' ')[0];
                     const args = text.trim().split(' ').slice(1);
-                    
-                    // ==================== VIEWONCE COMMANDS ====================
-                    
-                    // List semua media tersimpan
-                    if ((command === '.viewonce' || command === '.savedmedia' || command === '.listviewonce') && isOwner) {
-                        try {
-                            const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
-                                .filter(f => f.startsWith('viewonce_'))
-                                .sort((a, b) => {
-                                    return fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, b)).mtime.getTime() - 
-                                           fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, a)).mtime.getTime();
-                                });
-                            
-                            if (files.length === 0) {
-                                await sock.sendMessage(sender, { text: '📭 Belum ada media ViewOnce yang tersimpan.' });
-                                continue;
-                            }
-                            
-                            let listText = `🗂️ *VIEW ONCE ARCHIVE*\n\nTotal: ${files.length} file(s)\n\n`;
-                            files.slice(0, 10).forEach((file, index) => {
-                                const stat = fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, file));
-                                const size = (stat.size / 1024).toFixed(1) + ' KB';
-                                const date = new Date(stat.mtime).toLocaleString('id-ID');
-                                listText += `${index + 1}. ${file}\n   📦 ${size} | 📅 ${date}\n\n`;
-                            });
-                            
-                            if (files.length > 10) {
-                                listText += `\n...dan ${files.length - 10} file lainnya`;
-                            }
-                            
-                            listText += `\n💡 Gunakan .getviewonce <nomor> untuk mengambil file`;
-                            
-                            await sock.sendMessage(sender, { text: listText });
-                            
-                        } catch (error) {
-                            await sock.sendMessage(sender, { text: `❌ Error: ${error.message}` });
-                        }
-                        continue;
-                    }
-                    
-                    // Ambil specific file by number
-                    if (command === '.getviewonce' && isOwner) {
-                        try {
-                            const index = parseInt(args[0]) - 1;
-                            const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
-                                .filter(f => f.startsWith('viewonce_'))
-                                .sort((a, b) => {
-                                    return fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, b)).mtime.getTime() - 
-                                           fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, a)).mtime.getTime();
-                                });
-                            
-                            if (isNaN(index) || index < 0 || index >= files.length) {
-                                await sock.sendMessage(sender, { text: '⚠️ Nomor file tidak valid. Cek dengan .viewonce' });
-                                continue;
-                            }
-                            
-                            const fileName = files[index];
-                            const filePath = path.join(VIEWONCE_SAVE_FOLDER, fileName);
-                            const buffer = fs.readFileSync(filePath);
-                            const ext = fileName.split('.').pop().toLowerCase();
-                            
-                            await sock.sendMessage(sender, { 
-                                text: `📤 Mengirim file: ${fileName}`
-                            });
-                            
-                            if (ext === 'jpg' || ext === 'jpeg') {
-                                await sock.sendMessage(sender, { image: buffer, caption: `📷 ${fileName}` });
-                            } else if (ext === 'mp4') {
-                                await sock.sendMessage(sender, { 
-                                    video: buffer, 
-                                    caption: `🎥 ${fileName}`,
-                                    fileName: fileName 
-                                });
-                            }
-                            
-                        } catch (error) {
-                            await sock.sendMessage(sender, { text: `❌ Error: ${error.message}` });
-                        }
-                        continue;
-                    }
-                    
-                    // Hapus semua media tersimpan
-                    if (command === '.clearviewonce' && isOwner) {
-                        try {
-                            const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
-                                .filter(f => f.startsWith('viewonce_'));
-                            
-                            files.forEach(f => {
-                                fs.unlinkSync(path.join(VIEWONCE_SAVE_FOLDER, f));
-                            });
-                            
-                            viewOnceMessages.clear();
-                            
-                            await sock.sendMessage(sender, { 
-                                text: `🗑️ Berhasil menghapus ${files.length} file ViewOnce.` 
-                            });
-                        } catch (error) {
-                            await sock.sendMessage(sender, { text: `❌ Error: ${error.message}` });
-                        }
-                        continue;
-                    }
                     
                     // ==================== MENU ====================
                     if (command === '.menu' || command === '.help') {
@@ -1246,13 +1161,11 @@ async function startBot() {
                                 '┃ .toimg\n' +
                                 '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                                 '┏━━━━━━━━━━━━━━━━━━━━┓\n' +
-                                '┃ 🚨 *OWNER ONLY*\n' +
+                                '┃ 🚨 *VIEW ONCE*\n' +
                                 '┣━━━━━━━━━━━━━━━━━━━━┫\n' +
-                                '┃ .viewonce (list)\n' +
-                                '┃ .getviewonce [nomor]\n' +
-                                '┃ .clearviewonce\n' +
-                                '┃ .ban @user\n' +
-                                '┃ .unban @user\n' +
+                                '┃ .viewonce list\n' +
+                                '┃ .viewonce send [id]\n' +
+                                '┃ .viewonce clear\n' +
                                 '┗━━━━━━━━━━━━━━━━━━━━┛\n\n' +
                                 '━━━━━━━━━━━━━━━━━━━━\n' +
                                 '👤 Owner: wa.me/' + OWNER_NUMBER + '\n' +
@@ -1265,6 +1178,208 @@ async function startBot() {
                             console.error('❌ Menu error:', error.message);
                         }
                         continue;
+                    }
+                    
+                    // ==================== VIEW ONCE COMMANDS ====================
+                    
+                    // LIST VIEW ONCE
+                    if (command === '.viewonce') {
+                        const subCommand = args[0] || 'list';
+                        
+                        if (subCommand === 'list') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa melihat list viewonce!' });
+                                continue;
+                            }
+                            
+                            const savedCount = Array.from(viewOnceMessages.values()).length;
+                            const fileCount = fs.existsSync(VIEWONCE_SAVE_FOLDER) ? 
+                                fs.readdirSync(VIEWONCE_SAVE_FOLDER).filter(f => f.startsWith('viewonce_')).length : 0;
+                            
+                            let listText = `🚨 *VIEW ONCE SAVED MEDIA*\n\n`;
+                            listText += `📊 Stats:\n`;
+                            listText += `├ Total Saved: ${savedCount}\n`;
+                            listText += `├ Files in Folder: ${fileCount}\n`;
+                            listText += `└ Folder: ${VIEWONCE_SAVE_FOLDER}\n\n`;
+                            
+                            if (savedCount > 0) {
+                                listText += `📋 Latest 5:\n`;
+                                const latest = Array.from(viewOnceMessages.entries()).slice(-5).reverse();
+                                
+                                latest.forEach(([id, data], index) => {
+                                    const time = new Date(data.timestamp).toLocaleTimeString('id-ID');
+                                    listText += `${index + 1}. ${data.senderName} (${time})\n`;
+                                    listText += `   📁 ${data.mediaType.toUpperCase()} - ${data.caption || 'No caption'}\n`;
+                                    listText += `   🔑 ID: ${id.substring(0, 8)}...\n\n`;
+                                });
+                                
+                                listText += `💡 Kirim: .viewonce send [ID]\n`;
+                                listText += `🗑️  Hapus: .viewonce clear [ID]\n`;
+                            } else {
+                                listText += `📭 Tidak ada media viewonce yang disimpan.\n`;
+                            }
+                            
+                            listText += `\n🌐 Web Access: http://localhost:${PORT}/viewonce`;
+                            
+                            await sock.sendMessage(sender, { text: listText });
+                            continue;
+                        }
+                        
+                        // SEND VIEW ONCE
+                        else if (subCommand === 'send') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa mengirim viewonce!' });
+                                continue;
+                            }
+                            
+                            const targetId = args[1];
+                            if (!targetId) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Format: .viewonce send [message_id]\n💡 Gunakan .viewonce list untuk melihat ID' 
+                                });
+                                continue;
+                            }
+                            
+                            const savedMedia = viewOnceMessages.get(targetId);
+                            if (!savedMedia) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ ID tidak ditemukan! Gunakan .viewonce list untuk melihat ID yang valid' 
+                                });
+                                continue;
+                            }
+                            
+                            try {
+                                const mediaBuffer = fs.readFileSync(savedMedia.filePath);
+                                const caption = `🚨 View Once Saved\n👤 From: ${savedMedia.senderName}\n⏰ Time: ${new Date(savedMedia.timestamp).toLocaleString('id-ID')}\n💬 Caption: ${savedMedia.caption || 'No caption'}`;
+                                
+                                if (savedMedia.mediaType === 'image') {
+                                    await sock.sendMessage(sender, {
+                                        image: mediaBuffer,
+                                        caption: caption
+                                    });
+                                    await sock.sendMessage(sender, { 
+                                        text: `✅ Image viewonce berhasil dikirim!\n📁 File: ${path.basename(savedMedia.filePath)}` 
+                                    });
+                                } else if (savedMedia.mediaType === 'video') {
+                                    await sock.sendMessage(sender, {
+                                        video: mediaBuffer,
+                                        caption: caption
+                                    });
+                                    await sock.sendMessage(sender, { 
+                                        text: `✅ Video viewonce berhasil dikirim!\n📁 File: ${path.basename(savedMedia.filePath)}` 
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Error sending viewonce:', error);
+                                await sock.sendMessage(sender, { 
+                                    text: `❌ Gagal mengirim viewonce: ${error.message}` 
+                                });
+                            }
+                            continue;
+                        }
+                        
+                        // CLEAR VIEW ONCE
+                        else if (subCommand === 'clear') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa menghapus viewonce!' });
+                                continue;
+                            }
+                            
+                            const targetId = args[1];
+                            if (!targetId) {
+                                // Clear all
+                                const count = viewOnceMessages.size;
+                                const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
+                                    .filter(f => f.startsWith('viewonce_'));
+                                
+                                files.forEach(f => {
+                                    try {
+                                        fs.unlinkSync(path.join(VIEWONCE_SAVE_FOLDER, f));
+                                    } catch (e) {
+                                        console.error('Error deleting file:', e.message);
+                                    }
+                                });
+                                
+                                viewOnceMessages.clear();
+                                await sock.sendMessage(sender, { 
+                                    text: `✅ Semua viewonce telah dihapus!\n🗑️  ${count} item dihapus` 
+                                });
+                            } else {
+                                // Clear specific
+                                const savedMedia = viewOnceMessages.get(targetId);
+                                if (savedMedia) {
+                                    try {
+                                        if (fs.existsSync(savedMedia.filePath)) {
+                                            fs.unlinkSync(savedMedia.filePath);
+                                        }
+                                        viewOnceMessages.delete(targetId);
+                                        await sock.sendMessage(sender, { 
+                                            text: `✅ Viewonce dengan ID ${targetId.substring(0, 8)}... telah dihapus!` 
+                                        });
+                                    } catch (error) {
+                                        await sock.sendMessage(sender, { 
+                                            text: `❌ Gagal menghapus: ${error.message}` 
+                                        });
+                                    }
+                                } else {
+                                    await sock.sendMessage(sender, { 
+                                        text: '❌ ID tidak ditemukan!' 
+                                    });
+                                }
+                            }
+                            continue;
+                        }
+                        
+                        // FORWARD VIEW ONCE TO GROUP
+                        else if (subCommand === 'forward' && isGroup) {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa forward viewonce!' });
+                                continue;
+                            }
+                            
+                            const targetId = args[1];
+                            if (!targetId) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Format: .viewonce forward [message_id]' 
+                                });
+                                continue;
+                            }
+                            
+                            const savedMedia = viewOnceMessages.get(targetId);
+                            if (!savedMedia) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ ID tidak ditemukan!' 
+                                });
+                                continue;
+                            }
+                            
+                            try {
+                                const mediaBuffer = fs.readFileSync(savedMedia.filePath);
+                                const caption = `📸 Media dari View Once\n👤 Pengirim: ${savedMedia.senderName}\n⏰ Waktu: ${new Date(savedMedia.timestamp).toLocaleTimeString('id-ID')}\n💬 ${savedMedia.caption || ''}`;
+                                
+                                if (savedMedia.mediaType === 'image') {
+                                    await sock.sendMessage(sender, {
+                                        image: mediaBuffer,
+                                        caption: caption
+                                    });
+                                } else if (savedMedia.mediaType === 'video') {
+                                    await sock.sendMessage(sender, {
+                                        video: mediaBuffer,
+                                        caption: caption
+                                    });
+                                }
+                                
+                                await sock.sendMessage(sender, { 
+                                    text: `✅ Viewonce berhasil di-forward ke grup!\n👤 From: ${savedMedia.senderName}` 
+                                });
+                            } catch (error) {
+                                console.error('Error forwarding viewonce:', error);
+                                await sock.sendMessage(sender, { 
+                                    text: `❌ Gagal forward: ${error.message}` 
+                                });
+                            }
+                            continue;
+                        }
                     }
                     
                     // ==================== RESET SESSION (OWNER ONLY) ====================
@@ -2518,6 +2633,52 @@ async function startBot() {
                             await sock.sendMessage(sender, { 
                                 text: `✅ @${target.split('@')[0]} telah di-UNBAN!`, 
                                 mentions: [target] 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // SEND VIEWONCE TO GROUP
+                    if (command === '.sendviewonce' && isOwner && isGroup) {
+                        const targetId = args[0];
+                        if (!targetId) {
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Format: .sendviewonce [message_id]\n💡 Gunakan .viewonce list untuk melihat ID' 
+                            });
+                            continue;
+                        }
+                        
+                        const savedMedia = viewOnceMessages.get(targetId);
+                        if (!savedMedia) {
+                            await sock.sendMessage(sender, { 
+                                text: '❌ ID tidak ditemukan!' 
+                            });
+                            continue;
+                        }
+                        
+                        try {
+                            const mediaBuffer = fs.readFileSync(savedMedia.filePath);
+                            const caption = `📸 Media dari View Once\n👤 Pengirim: ${savedMedia.senderName}\n⏰ Waktu: ${new Date(savedMedia.timestamp).toLocaleTimeString('id-ID')}`;
+                            
+                            if (savedMedia.mediaType === 'image') {
+                                await sock.sendMessage(sender, {
+                                    image: mediaBuffer,
+                                    caption: caption
+                                });
+                            } else if (savedMedia.mediaType === 'video') {
+                                await sock.sendMessage(sender, {
+                                    video: mediaBuffer,
+                                    caption: caption
+                                });
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `✅ Viewonce berhasil dikirim ke grup!\n👤 From: ${savedMedia.senderName}` 
+                            });
+                        } catch (error) {
+                            console.error('Error sending viewonce:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal mengirim: ${error.message}` 
                             });
                         }
                         continue;
