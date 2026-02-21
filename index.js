@@ -1,4 +1,4 @@
-// index.js - VERSION 2.0 WITH 15+ GAMES & RPG SYSTEM
+// index.js - VERSION 2.0 WITH 15+ GAMES & RPG SYSTEM & DUAL LOGIN
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
@@ -10,7 +10,8 @@ import makeWASocket, {
     makeCacheableSignalKeyStore,
     Browsers,
     proto,
-    getContentType
+    getContentType,
+    PHONENUMBER_MCC
 } from '@whiskeysockets/baileys';
 
 import { Boom } from '@hapi/boom';
@@ -25,56 +26,56 @@ import qrcode from 'qrcode-terminal';
 import pino from 'pino';
 import Groq from 'groq-sdk';
 import { fileURLToPath } from 'url';
+import readline from 'readline';
 
-// ✅ IMPORT MONGODB AUTH
+// ✅ IMPORT MONGODB AUTH & SYSTEMS
 import { useMongoAuthState } from './mongoAuth.js';
-
-// ✅ IMPORT GAME & RPG SYSTEMS
 import GameSystem from './gameSystem.js';
 import RPGSystem from './rpgSystem.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
 const execPromise = promisify(exec);
 const NodeCache = require("node-cache");
 const msgRetryCounterCache = new NodeCache();
 
-// Konfigurasi
+// ==================== CONFIGURATION ====================
+const usePairingCode = true; // ❗ TRUE = Pairing Code, FALSE = QR Scan
+const phoneNumber = "994400007267"; // Isi nomor bot jika ingin auto-input (contoh: "628xxx")
+
 const PORT = process.env.PORT || 3000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
-
 const BOT_NAME = 'Jonkris-Bot';
 const OWNER_NUMBER = '6289509158681';
 const OWNER_JID = '103066632216677@lid';
-
 const BOT_START_TIME = Date.now();
 
+// State & Cache
 const bannedUsers = new Set();
 const welcomeEnabled = new Map();
-
-// State management
 const messageStore = {};
 const viewOnceMessages = new Map();
+const reactions = ['❤️', '👍', '🔥', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯', '✨', '⚡', '💪', '🤝', '🌟'];
 
 // 🌟 ANTI VIEWONCE CONFIG
 const ANTI_VIEWONCE_ENABLED = true;
 const VIEWONCE_SAVE_FOLDER = './viewonce_saved';
+let AUTO_REPLY_VIEWONCE = true;
+let AUTO_REPLY_IN_GROUP = true;
+let AUTO_REPLY_IN_PRIVATE = true;
+let AUTO_REPLY_AS_QUOTE = true;
+const AUTO_REPLY_TEXT = "🚨 *VIEW ONCE DETECTED!*\nIsi pesan telah disimpan dan ditampilkan kembali:";
+
 if (ANTI_VIEWONCE_ENABLED && !fs.existsSync(VIEWONCE_SAVE_FOLDER)) {
     fs.mkdirSync(VIEWONCE_SAVE_FOLDER, { recursive: true });
 }
 
-// 🌟 CONFIG BALAS OTOMATIS VIEWONCE - PAKAI LET AGAR BISA DIUBAH
-let AUTO_REPLY_VIEWONCE = true; // Aktifkan balas otomatis
-const AUTO_REPLY_TEXT = "🚨 *VIEW ONCE DETECTED!*\nSaya telah menyimpan dan menampilkan isi pesan ini:";
-let AUTO_REPLY_IN_GROUP = true; // Balas di grup
-let AUTO_REPLY_IN_PRIVATE = true; // Balas di chat pribadi
-let AUTO_REPLY_AS_QUOTE = true; // Balas sebagai reply ke pesan asli
+// Readline for Pairing Code
+const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+const question = (text) => new Promise((resolve) => rl.question(text, resolve));
 
-const reactions = ['❤️', '👍', '🔥', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯', '✨', '⚡', '💪', '🤝', '🌟'];
-
-// Utility Functions
+// ==================== UTILITY FUNCTIONS ====================
 function getRandomReaction() {
     return reactions[Math.floor(Math.random() * reactions.length)];
 }
@@ -133,7 +134,6 @@ async function getAICodingMotivation() {
     }
 }
 
-// 📥 DOWNLOADER FUNCTIONS
 async function downloadMedia(url, options = {}) {
     try {
         const response = await axios({
@@ -892,7 +892,7 @@ app.listen(PORT, () => {
     console.log(`🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ACTIVE' : 'INACTIVE'}`);
 });
 
-// Main Bot Function
+// ==================== MAIN BOT FUNCTION ====================
 async function startBot() {
     try {
         console.log('🚀 Starting WhatsApp Bot v2.0...');
@@ -908,11 +908,12 @@ async function startBot() {
         console.log(`💾 Database: MongoDB`);
         console.log(`🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ENABLED' : 'DISABLED'}`);
         console.log(`🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ENABLED' : 'DISABLED'}`);
+        console.log(`📱 Login Mode: ${usePairingCode ? 'PAIRING CODE' : 'QR SCAN'}`);
 
         const sock = makeWASocket({
             version,
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: false,
+            printQRInTerminal: !usePairingCode, // QR hanya muncul jika pairing code mati
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
@@ -933,10 +934,33 @@ async function startBot() {
         const gameSystem = new GameSystem(sock);
         const rpgSystem = new RPGSystem();
 
+        // 🔑 LOGIKA PAIRING CODE
+        if (usePairingCode && !sock.authState.creds.registered) {
+            let number = phoneNumber;
+            if (!number) {
+                number = await question('\n[?] Masukkan Nomor WhatsApp Bot (Contoh: 628xxx):\n> ');
+            }
+            number = number.replace(/[^0-9]/g, '');
+
+            if (!PHONENUMBER_MCC[number.substring(0, 2)] && !PHONENUMBER_MCC[number.substring(0, 3)]) {
+                console.log("❌ Gunakan kode negara yang benar!");
+                process.exit(0);
+            }
+
+            setTimeout(async () => {
+                let code = await sock.requestPairingCode(number);
+                code = code?.match(/.{1,4}/g)?.join("-") || code;
+                console.log(`\n============================`);
+                console.log(`📲 KODE PAIRING ANDA:`);
+                console.log(`\x1b[32m${code}\x1b[0m`);
+                console.log(`============================\n`);
+            }, 3000);
+        }
+
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
-            if (qr) {
+            if (qr && !usePairingCode) {
                 console.log('\n╔══════════════════════╗');
                 console.log('║  📱 SCAN QR CODE    ║');
                 console.log('╚══════════════════════╝\n');
@@ -954,6 +978,8 @@ async function startBot() {
                     setTimeout(() => startBot(), 3000);
                 } else {
                     console.log('❌ Logged out, please scan QR again');
+                    await clearData();
+                    process.exit(1);
                 }
             } else if (connection === 'open') {
                 console.log('\n╔════════════════════════════════════════╗');
@@ -965,6 +991,7 @@ async function startBot() {
                 console.log(`║  🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ACTIVE ✓' : 'INACTIVE'} ║`);
                 console.log('║  👥 Group Tools Ready ✓                 ║');
                 console.log('║  💾 MongoDB Connected ✓                 ║');
+                console.log(`║  📱 Mode: ${usePairingCode ? 'PAIRING' : 'QR SCAN'} ✓            ║`);
                 console.log('╚════════════════════════════════════════╝\n');
                 
                 try {
@@ -987,6 +1014,7 @@ async function startBot() {
                         `🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'Active ✓' : 'Inactive'}\n` +
                         '👥 Group Tools: Ready ✓\n' +
                         '💾 Database: MongoDB ✓\n' +
+                        `📱 Login Mode: ${usePairingCode ? 'Pairing Code ✓' : 'QR Scan ✓'}\n` +
                         '━━━━━━━━━━━━━━━━━━━━';
                     
                     await sock.sendMessage(OWNER_JID, { text: statusMsg });
@@ -1094,7 +1122,7 @@ async function startBot() {
             }
         });
 
-        // Handle message updates
+        // Handle message updates (anti-delete)
         sock.ev.on('messages.update', async (updates) => {
             for (const update of updates) {
                 try {
@@ -1286,6 +1314,7 @@ async function startBot() {
                                 '👤 Owner: wa.me/' + OWNER_NUMBER + '\n' +
                                 '💾 Database: MongoDB\n' +
                                 '🤖 AI Powered Bot v2.0\n' +
+                                `📱 Login Mode: ${usePairingCode ? 'Pairing Code' : 'QR Scan'}\n` +
                                 '━━━━━━━━━━━━━━━━━━━━';
                             
                             await sock.sendMessage(sender, { text: menuText });
@@ -1583,7 +1612,7 @@ async function startBot() {
                             await sock.sendMessage(sender, { text: '🔄 *Mereset session MongoDB...*' });
                             await clearData();
                             await sock.sendMessage(sender, { 
-                                text: '✅ Session dihapus dari MongoDB!\n\nBot akan restart & QR baru akan muncul dalam 5 detik...' 
+                                text: '✅ Session dihapus dari MongoDB!\n\nBot akan restart & login baru akan muncul dalam 5 detik...' 
                             });
                             setTimeout(() => process.exit(1), 5000);
                         } catch (e) {
@@ -2587,6 +2616,7 @@ async function startBot() {
                             `┃ ⏱️ ${formatRuntime(Date.now() - BOT_START_TIME)}\n` +
                             `┃ 📅 ${new Date(BOT_START_TIME).toLocaleString('id-ID')}\n` +
                             `┃ 💾 Database: MongoDB\n` +
+                            `┃ 📱 Mode: ${usePairingCode ? 'Pairing Code' : 'QR Scan'}\n` +
                             '┗━━━━━━━━━━━━━━━━┛';
                         
                         await sock.sendMessage(sender, { text: runtimeText });
@@ -2929,4 +2959,5 @@ process.on('unhandledRejection', (err) => {
     console.error('💥 Unhandled Rejection:', err.message);
 });
 
+// ==================== START BOT ====================
 startBot();
