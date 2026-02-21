@@ -22,6 +22,7 @@ import { promisify } from 'util';
 import axios from 'axios';
 import sharp from 'sharp';
 import qrcode from 'qrcode-terminal';
+import QRCode from 'qrcode';
 import pino from 'pino';
 import Groq from 'groq-sdk';
 import { fileURLToPath } from 'url';
@@ -57,6 +58,9 @@ const welcomeEnabled = new Map();
 // State management
 const messageStore = {};
 const viewOnceMessages = new Map();
+
+// SSE Clients for QR
+global.qrClients = [];
 
 // 🌟 ANTI VIEWONCE CONFIG
 const ANTI_VIEWONCE_ENABLED = true;
@@ -554,6 +558,7 @@ async function saveViewOnceMedia(sock, m) {
 const app = express();
 app.use(express.json());
 
+// Halaman Utama Dashboard
 app.get('/', (req, res) => {
     const dateInfo = getFormattedDate();
     const runtime = formatRuntime(Date.now() - BOT_START_TIME);
@@ -667,59 +672,17 @@ app.get('/', (req, res) => {
                     color: #666;
                     font-size: 14px;
                 }
-                .viewonce-list {
-                    background: #f8f9fa;
-                    padding: 15px;
-                    border-radius: 10px;
-                    margin: 20px 0;
-                    max-height: 300px;
-                    overflow-y: auto;
-                }
-                .viewonce-item {
-                    padding: 10px;
-                    border-bottom: 1px solid #ddd;
-                    display: flex;
-                    justify-content: space-between;
-                    align-items: center;
-                }
-                .viewonce-item:last-child {
-                    border-bottom: none;
-                }
-                .download-btn {
+                .qr-button {
                     background: #667eea;
                     color: white;
-                    padding: 5px 10px;
-                    border-radius: 5px;
-                    text-decoration: none;
-                    font-size: 12px;
-                }
-                .config-info {
-                    background: #f0f8ff;
-                    padding: 15px;
+                    border: none;
+                    padding: 15px 30px;
                     border-radius: 10px;
-                    margin: 15px 0;
-                    text-align: left;
-                }
-                .config-info h4 {
-                    color: #667eea;
-                    margin-bottom: 10px;
-                }
-                .config-item {
-                    display: flex;
-                    justify-content: space-between;
-                    padding: 5px 0;
-                    border-bottom: 1px solid #e0e0e0;
-                }
-                .config-item:last-child {
-                    border-bottom: none;
-                }
-                .status-on {
-                    color: #4CAF50;
-                    font-weight: bold;
-                }
-                .status-off {
-                    color: #f44336;
-                    font-weight: bold;
+                    font-size: 18px;
+                    cursor: pointer;
+                    text-decoration: none;
+                    display: inline-block;
+                    margin: 10px 0;
                 }
             </style>
         </head>
@@ -748,29 +711,7 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
                 
-                <div class="config-info">
-                    <h4>🚨 Anti ViewOnce Configuration</h4>
-                    <div class="config-item">
-                        <span>Auto Reply ViewOnce:</span>
-                        <span class="${AUTO_REPLY_VIEWONCE ? 'status-on' : 'status-off'}">${AUTO_REPLY_VIEWONCE ? 'ACTIVE' : 'INACTIVE'}</span>
-                    </div>
-                    <div class="config-item">
-                        <span>Reply in Groups:</span>
-                        <span class="${AUTO_REPLY_IN_GROUP ? 'status-on' : 'status-off'}">${AUTO_REPLY_IN_GROUP ? 'YES' : 'NO'}</span>
-                    </div>
-                    <div class="config-item">
-                        <span>Reply in Private:</span>
-                        <span class="${AUTO_REPLY_IN_PRIVATE ? 'status-on' : 'status-off'}">${AUTO_REPLY_IN_PRIVATE ? 'YES' : 'NO'}</span>
-                    </div>
-                    <div class="config-item">
-                        <span>Reply as Quote:</span>
-                        <span class="${AUTO_REPLY_AS_QUOTE ? 'status-on' : 'status-off'}">${AUTO_REPLY_AS_QUOTE ? 'YES' : 'NO'}</span>
-                    </div>
-                    <div class="config-item">
-                        <span>Auto Reply Text:</span>
-                        <span>${AUTO_REPLY_TEXT.substring(0, 30)}...</span>
-                    </div>
-                </div>
+                <a href="/qr" class="qr-button">📱 Scan QR Code</a>
                 
                 <div class="features">
                     <h3>✨ Featured Systems</h3>
@@ -794,36 +735,6 @@ app.get('/', (req, res) => {
                     </div>
                 </div>
                 
-                <div class="features">
-                    <h3>🚨 View Once Saved Media (Latest 10)</h3>
-                    <div class="viewonce-list">
-                        ${(() => {
-                            try {
-                                const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
-                                    .filter(f => f.startsWith('viewonce_'))
-                                    .slice(-10)
-                                    .reverse()
-                                    .map(f => {
-                                        const stats = fs.statSync(path.join(VIEWONCE_SAVE_FOLDER, f));
-                                        const size = (stats.size / 1024).toFixed(2);
-                                        return `
-                                            <div class="viewonce-item">
-                                                <div>
-                                                    <strong>${f}</strong><br>
-                                                    <small>${new Date(stats.mtime).toLocaleString('id-ID')} • ${size} KB</small>
-                                                </div>
-                                                <a href="/viewonce/files/${f}" class="download-btn" download>Download</a>
-                                            </div>
-                                        `;
-                                    }).join('');
-                                return files || '<p>No saved view once media yet</p>';
-                            } catch {
-                                return '<p>Folder not found</p>';
-                            }
-                        })()}
-                    </div>
-                </div>
-                
                 <div class="footer">
                     👤 Owner: ${OWNER_NUMBER}<br>
                     🚀 Powered by Baileys & MongoDB<br>
@@ -840,6 +751,7 @@ app.get('/', (req, res) => {
     `);
 });
 
+// Health Check
 app.get('/health', (req, res) => {
     res.json({
         status: 'healthy',
@@ -856,6 +768,217 @@ app.get('/health', (req, res) => {
     });
 });
 
+// SSE Stream untuk QR Code
+app.get('/qr-stream', (req, res) => {
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+    });
+    
+    global.qrClients.push(res);
+    
+    req.on('close', () => {
+        global.qrClients = global.qrClients.filter(client => client !== res);
+    });
+});
+
+// Halaman QR Code
+app.get('/qr', (req, res) => {
+    res.send(`
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Scan QR - ${BOT_NAME}</title>
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+                * { margin: 0; padding: 0; box-sizing: border-box; }
+                body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    min-height: 100vh;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    padding: 20px;
+                }
+                .container {
+                    background: white;
+                    padding: 40px;
+                    border-radius: 20px;
+                    box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+                    text-align: center;
+                    max-width: 500px;
+                    width: 100%;
+                }
+                h1 {
+                    color: #667eea;
+                    margin-bottom: 20px;
+                    font-size: 28px;
+                }
+                .qr-container {
+                    background: #f8f9fa;
+                    padding: 30px;
+                    border-radius: 15px;
+                    margin: 20px 0;
+                    min-height: 300px;
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                }
+                #qr-image {
+                    max-width: 250px;
+                    image-rendering: pixelated;
+                }
+                .status {
+                    padding: 15px;
+                    border-radius: 10px;
+                    margin: 15px 0;
+                    font-weight: bold;
+                }
+                .status.waiting {
+                    background: #fff3cd;
+                    color: #856404;
+                }
+                .status.connected {
+                    background: #d4edda;
+                    color: #155724;
+                }
+                .status.error {
+                    background: #f8d7da;
+                    color: #721c24;
+                }
+                .instructions {
+                    text-align: left;
+                    background: #f8f9fa;
+                    padding: 20px;
+                    border-radius: 10px;
+                    margin: 20px 0;
+                }
+                .instructions ol {
+                    margin-left: 20px;
+                    margin-top: 10px;
+                }
+                .instructions li {
+                    margin: 10px 0;
+                    color: #555;
+                }
+                .footer {
+                    margin-top: 30px;
+                    color: #666;
+                    font-size: 14px;
+                }
+                .refresh-btn {
+                    background: #667eea;
+                    color: white;
+                    border: none;
+                    padding: 10px 20px;
+                    border-radius: 10px;
+                    cursor: pointer;
+                    font-size: 16px;
+                    margin-top: 10px;
+                }
+                .refresh-btn:hover {
+                    background: #5a67d8;
+                }
+                .loading {
+                    animation: spin 1s linear infinite;
+                    font-size: 40px;
+                }
+                @keyframes spin {
+                    0% { transform: rotate(0deg); }
+                    100% { transform: rotate(360deg); }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>📱 Scan QR Code</h1>
+                <p>Untuk ${BOT_NAME} v2.0</p>
+                
+                <div class="qr-container">
+                    <div id="loading" style="display: block;">
+                        <div class="loading">⏳</div>
+                        <p>Menunggu QR Code...</p>
+                    </div>
+                    <img id="qr-image" style="display: none;" alt="QR Code">
+                </div>
+                
+                <div id="status" class="status waiting">
+                    ⏳ Menunggu QR Code...
+                </div>
+                
+                <div class="instructions">
+                    <strong>📝 Cara Scan:</strong>
+                    <ol>
+                        <li>Buka WhatsApp di ponsel</li>
+                        <li>Ketuk menu (3 titik) atau Settings</li>
+                        <li>Pilih "Linked Devices" atau "Perangkat Tertaut"</li>
+                        <li>Ketuk "Link a Device"</li>
+                        <li>Scan QR Code di atas</li>
+                    </ol>
+                </div>
+                
+                <button class="refresh-btn" onclick="location.reload()">
+                    🔄 Refresh Halaman
+                </button>
+                
+                <div class="footer">
+                    ⏱️ QR akan muncul otomatis saat bot memintanya<br>
+                    ${BOT_NAME} v2.0
+                </div>
+            </div>
+            
+            <script>
+                const statusDiv = document.getElementById('status');
+                const qrImage = document.getElementById('qr-image');
+                const loadingDiv = document.getElementById('loading');
+                
+                // Connect to SSE stream
+                const eventSource = new EventSource('/qr-stream');
+                
+                eventSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.qr) {
+                        // Show QR image
+                        qrImage.src = data.qr;
+                        qrImage.style.display = 'block';
+                        loadingDiv.style.display = 'none';
+                        
+                        statusDiv.className = 'status waiting';
+                        statusDiv.innerHTML = '📱 Scan QR Code dengan WhatsApp Anda';
+                    }
+                };
+                
+                eventSource.onerror = function() {
+                    statusDiv.className = 'status error';
+                    statusDiv.innerHTML = '❌ Koneksi terputus. Refresh halaman.';
+                };
+                
+                // Cek status koneksi setiap 5 detik
+                setInterval(async () => {
+                    try {
+                        const response = await fetch('/health');
+                        const data = await response.json();
+                        
+                        if (data.status === 'healthy') {
+                            // Jika sudah connected, redirect ke dashboard
+                            if (data.uptime !== '0s' && data.uptime.includes('s')) {
+                                window.location.href = '/';
+                            }
+                        }
+                    } catch (e) {
+                        console.error('Health check failed:', e);
+                    }
+                }, 5000);
+            </script>
+        </body>
+        </html>
+    `);
+});
+
+// ViewOnce endpoints
 app.get('/viewonce', (req, res) => {
     try {
         const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
@@ -883,9 +1006,11 @@ app.get('/viewonce', (req, res) => {
 
 app.use('/viewonce/files', express.static(VIEWONCE_SAVE_FOLDER));
 
+// Start Express Server
 app.listen(PORT, () => {
     console.log(`✅ Server running on port ${PORT}`);
     console.log(`🌐 Dashboard: http://localhost:${PORT}`);
+    console.log(`📱 QR Page: http://localhost:${PORT}/qr`);
     console.log(`📊 Health: http://localhost:${PORT}/health`);
     console.log(`🎮 ${BOT_NAME} v2.0 - 15+ Games Ready!`);
     console.log(`🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ACTIVE' : 'INACTIVE'}`);
@@ -912,7 +1037,7 @@ async function startBot() {
         const sock = makeWASocket({
             version,
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: false,
+            printQRInTerminal: false, // QR tidak dicetak di terminal
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
@@ -940,7 +1065,29 @@ async function startBot() {
                 console.log('\n╔══════════════════════╗');
                 console.log('║  📱 SCAN QR CODE    ║');
                 console.log('╚══════════════════════╝\n');
+                
+                // Cetak QR di terminal untuk development (opsional)
                 qrcode.generate(qr, { small: true });
+                
+                // Generate QR sebagai data URL untuk web
+                try {
+                    const qrDataUrl = await QRCode.toDataURL(qr);
+                    
+                    // Kirim QR ke semua client yang terhubung via SSE
+                    if (global.qrClients && global.qrClients.length > 0) {
+                        global.qrClients.forEach(client => {
+                            try {
+                                client.write(`data: ${JSON.stringify({ qr: qrDataUrl, qrString: qr })}\n\n`);
+                            } catch (e) {
+                                console.error('Error sending QR to client:', e.message);
+                            }
+                        });
+                    }
+                    
+                    console.log('✅ QR Code tersedia di dashboard web: /qr');
+                } catch (err) {
+                    console.error('Error generating QR for web:', err.message);
+                }
             }
             
             if (connection === 'close') {
@@ -954,6 +1101,14 @@ async function startBot() {
                     setTimeout(() => startBot(), 3000);
                 } else {
                     console.log('❌ Logged out, please scan QR again');
+                    // Reset state di MongoDB jika logout
+                    try {
+                        const { clearData } = await useMongoAuthState();
+                        await clearData();
+                        console.log('✅ Session data cleared from MongoDB');
+                    } catch (e) {
+                        console.error('Error clearing data:', e.message);
+                    }
                 }
             } else if (connection === 'open') {
                 console.log('\n╔════════════════════════════════════════╗');
@@ -1365,7 +1520,7 @@ async function startBot() {
                                 listText += `📭 Tidak ada media viewonce yang disimpan.\n`;
                             }
                             
-                            listText += `\n🌐 Web Access: http://localhost:${PORT}/viewonce`;
+                            listText += `\n🌐 Web Access: /viewonce`;
                             
                             await sock.sendMessage(sender, { text: listText });
                             continue;
