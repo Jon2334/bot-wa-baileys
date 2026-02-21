@@ -1,4 +1,4 @@
-// index.js - VERSION 2.0 WITH FIXED PAIRING & RECONNECTION
+// index.js - VERSION 2.0 WITH 15+ GAMES & RPG SYSTEM
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
@@ -25,56 +25,56 @@ import qrcode from 'qrcode-terminal';
 import pino from 'pino';
 import Groq from 'groq-sdk';
 import { fileURLToPath } from 'url';
-import readline from 'readline';
 
-// ✅ IMPORT MONGODB AUTH & SYSTEMS
+// ✅ IMPORT MONGODB AUTH
 import { useMongoAuthState } from './mongoAuth.js';
+
+// ✅ IMPORT GAME & RPG SYSTEMS
 import GameSystem from './gameSystem.js';
 import RPGSystem from './rpgSystem.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
 const execPromise = promisify(exec);
 const NodeCache = require("node-cache");
 const msgRetryCounterCache = new NodeCache();
 
-// ==================== CONFIGURATION ====================
-const usePairingCode = true; // ❗ TRUE = Pairing Code, FALSE = QR Scan
-const phoneNumber = "994400007267"; // Isi nomor bot
-
+// Konfigurasi
 const PORT = process.env.PORT || 3000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
 const groq = GROQ_API_KEY ? new Groq({ apiKey: GROQ_API_KEY }) : null;
+
 const BOT_NAME = 'Jonkris-Bot';
 const OWNER_NUMBER = '6289509158681';
 const OWNER_JID = '103066632216677@lid';
+
 const BOT_START_TIME = Date.now();
 
-// State & Cache
 const bannedUsers = new Set();
 const welcomeEnabled = new Map();
+
+// State management
 const messageStore = {};
 const viewOnceMessages = new Map();
-const reactions = ['❤️', '👍', '🔥', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯', '✨', '⚡', '💪', '🤝', '🌟'];
 
 // 🌟 ANTI VIEWONCE CONFIG
 const ANTI_VIEWONCE_ENABLED = true;
 const VIEWONCE_SAVE_FOLDER = './viewonce_saved';
-let AUTO_REPLY_VIEWONCE = true;
-let AUTO_REPLY_IN_GROUP = true;
-let AUTO_REPLY_IN_PRIVATE = true;
-let AUTO_REPLY_AS_QUOTE = true;
-const AUTO_REPLY_TEXT = "🚨 *VIEW ONCE DETECTED!*\nIsi pesan telah disimpan dan ditampilkan kembali:";
-
 if (ANTI_VIEWONCE_ENABLED && !fs.existsSync(VIEWONCE_SAVE_FOLDER)) {
     fs.mkdirSync(VIEWONCE_SAVE_FOLDER, { recursive: true });
 }
 
-// Readline for Pairing Code
-const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-const question = (text) => new Promise((resolve) => rl.question(text, resolve));
+// 🌟 CONFIG BALAS OTOMATIS VIEWONCE - PAKAI LET AGAR BISA DIUBAH
+let AUTO_REPLY_VIEWONCE = true; // Aktifkan balas otomatis
+const AUTO_REPLY_TEXT = "🚨 *VIEW ONCE DETECTED!*\nSaya telah menyimpan dan menampilkan isi pesan ini:";
+let AUTO_REPLY_IN_GROUP = true; // Balas di grup
+let AUTO_REPLY_IN_PRIVATE = true; // Balas di chat pribadi
+let AUTO_REPLY_AS_QUOTE = true; // Balas sebagai reply ke pesan asli
 
-// ==================== UTILITY FUNCTIONS ====================
+const reactions = ['❤️', '👍', '🔥', '😂', '😮', '😢', '🙏', '👏', '🎉', '💯', '✨', '⚡', '💪', '🤝', '🌟'];
+
+// Utility Functions
 function getRandomReaction() {
     return reactions[Math.floor(Math.random() * reactions.length)];
 }
@@ -85,12 +85,6 @@ function getGreeting() {
     if (hour >= 11 && hour < 15) return 'Selamat Siang';
     if (hour >= 15 && hour < 18) return 'Selamat Sore';
     return 'Selamat Malam';
-}
-
-// ✅ FUNGSI VALIDASI NOMOR
-function validatePhoneNumber(number) {
-    const cleanNumber = number.replace(/\D/g, '');
-    return cleanNumber.length >= 8 && cleanNumber.length <= 15;
 }
 
 function getFormattedDate() {
@@ -139,6 +133,7 @@ async function getAICodingMotivation() {
     }
 }
 
+// 📥 DOWNLOADER FUNCTIONS
 async function downloadMedia(url, options = {}) {
     try {
         const response = await axios({
@@ -373,7 +368,7 @@ async function convertStickerToImage(stickerBuffer) {
     }
 }
 
-// 🌟 ANTI VIEWONCE FUNCTION
+// 🌟 ANTI VIEWONCE FUNCTION - DIPERBAIKI DENGAN BALAS OTOMATIS
 async function saveViewOnceMedia(sock, m) {
     try {
         if (!m.message) return;
@@ -386,6 +381,7 @@ async function saveViewOnceMedia(sock, m) {
         const userId = m.key.participant || sender;
         const isOwner = userId === OWNER_JID;
         
+        // Cek apakah ini pesan viewOnce
         const isViewOnce = 
             msg.viewOnceMessageV2 || 
             msg.viewOnceMessageV2Extension || 
@@ -403,6 +399,7 @@ async function saveViewOnceMedia(sock, m) {
         let caption = '';
         let mimetype = '';
         
+        // Ekstrak konten dari viewOnce
         let viewOnceContent = null;
         
         if (msg.viewOnceMessageV2?.message) {
@@ -416,6 +413,7 @@ async function saveViewOnceMedia(sock, m) {
         }
         
         if (viewOnceContent) {
+            // Cek untuk image
             if (viewOnceContent.imageMessage) {
                 mediaType = 'image';
                 mimetype = viewOnceContent.imageMessage.mimetype || 'image/jpeg';
@@ -428,6 +426,7 @@ async function saveViewOnceMedia(sock, m) {
                     return;
                 }
             } 
+            // Cek untuk video
             else if (viewOnceContent.videoMessage) {
                 mediaType = 'video';
                 mimetype = viewOnceContent.videoMessage.mimetype || 'video/mp4';
@@ -459,6 +458,7 @@ async function saveViewOnceMedia(sock, m) {
                 return;
             }
             
+            // Simpan metadata
             viewOnceMessages.set(messageId, {
                 sender,
                 senderName,
@@ -472,28 +472,36 @@ async function saveViewOnceMedia(sock, m) {
                 messageKey: m.key
             });
             
+            // 🌟 BALAS OTOMATIS DENGAN ISI VIEWONCE
             if (ANTI_VIEWONCE_ENABLED && AUTO_REPLY_VIEWONCE) {
                 try {
+                    // Cek apakah harus membalas di grup/private
                     const shouldReply = (isGroup && AUTO_REPLY_IN_GROUP) || 
                                       (!isGroup && AUTO_REPLY_IN_PRIVATE);
                     
                     if (shouldReply) {
                         const replyText = `${AUTO_REPLY_TEXT}\n👤 Dari: ${senderName}\n⏰ ${new Date().toLocaleTimeString('id-ID')}\n💬 ${caption || 'Tanpa caption'}`;
                         
+                        console.log(`🤖 Auto-replying to ${senderName} with ${mediaType}`);
+                        
+                        // Kirim balasan berdasarkan tipe media
                         if (mediaType === 'image') {
                             await sock.sendMessage(sender, {
                                 image: mediaBuffer,
                                 caption: replyText,
                                 ...(AUTO_REPLY_AS_QUOTE && { quoted: m })
                             });
+                            console.log(`✅ Auto-replied with image viewonce to ${senderName}`);
                         } else if (mediaType === 'video') {
                             await sock.sendMessage(sender, {
                                 video: mediaBuffer,
                                 caption: replyText,
                                 ...(AUTO_REPLY_AS_QUOTE && { quoted: m })
                             });
+                            console.log(`✅ Auto-replied with video viewonce to ${senderName}`);
                         }
                         
+                        // Tambahkan reaksi untuk konfirmasi
                         await sock.sendMessage(sender, {
                             react: {
                                 text: '✅',
@@ -506,6 +514,7 @@ async function saveViewOnceMedia(sock, m) {
                 }
             }
             
+            // Kirim notifikasi ke owner
             if (sender !== OWNER_JID) {
                 const notif = 
                     `🚨 *VIEW ONCE DETECTED!*\n\n` +
@@ -519,6 +528,7 @@ async function saveViewOnceMedia(sock, m) {
                 try {
                     await sock.sendMessage(OWNER_JID, { text: notif });
                     
+                    // Kirim media ke owner
                     if (mediaType === 'image') {
                         await sock.sendMessage(OWNER_JID, {
                             image: mediaBuffer,
@@ -882,7 +892,7 @@ app.listen(PORT, () => {
     console.log(`🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ACTIVE' : 'INACTIVE'}`);
 });
 
-// ==================== MAIN BOT FUNCTION ====================
+// Main Bot Function
 async function startBot() {
     try {
         console.log('🚀 Starting WhatsApp Bot v2.0...');
@@ -898,12 +908,11 @@ async function startBot() {
         console.log(`💾 Database: MongoDB`);
         console.log(`🚨 Anti ViewOnce: ${ANTI_VIEWONCE_ENABLED ? 'ENABLED' : 'DISABLED'}`);
         console.log(`🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ENABLED' : 'DISABLED'}`);
-        console.log(`📱 Login Mode: ${usePairingCode ? 'PAIRING CODE' : 'QR SCAN'}`);
 
         const sock = makeWASocket({
             version,
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: !usePairingCode,
+            printQRInTerminal: false,
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
@@ -917,114 +926,17 @@ async function startBot() {
             shouldIgnoreJid: (jid) => jid?.endsWith('@broadcast') || false,
             markOnlineOnConnect: true,
             generateHighQualityLinkPreview: true,
-            syncFullHistory: false,
-            // Tambahkan defaultQueryTimeoutMs untuk kestabilan
-            defaultQueryTimeoutMs: 60000
+            syncFullHistory: false
         });
 
         // Initialize Game & RPG Systems
         const gameSystem = new GameSystem(sock);
         const rpgSystem = new RPGSystem();
 
-        // 🔑 LOGIKA PAIRING CODE - VERSI STABIL
-        if (usePairingCode && !sock.authState.creds.registered) {
-            // Fungsi untuk meminta pairing code
-            const requestPairingCodeWithRetry = async (number) => {
-                let attempts = 0;
-                const maxAttempts = 3;
-                
-                while (attempts < maxAttempts) {
-                    try {
-                        console.log(`⏳ Mencoba mendapatkan kode pairing (percobaan ${attempts + 1}/${maxAttempts})...`);
-                        
-                        // Bersihkan nomor dari karakter non-digit
-                        const cleanNumber = number.replace(/\D/g, '');
-                        
-                        // Pastikan nomor dalam format internasional (tanpa +)
-                        let finalNumber = cleanNumber;
-                        if (cleanNumber.startsWith('0')) {
-                            console.log('⚠️ Nomor dimulai dengan 0, mengganti dengan kode negara 62...');
-                            finalNumber = '62' + cleanNumber.substring(1);
-                        }
-                        
-                        console.log(`📱 Menggunakan nomor: ${finalNumber}`);
-                        
-                        // Request pairing code dengan timeout lebih panjang
-                        const pairingCode = await Promise.race([
-                            sock.requestPairingCode(finalNumber),
-                            new Promise((_, reject) => 
-                                setTimeout(() => reject(new Error('Timeout setelah 30 detik')), 30000)
-                            )
-                        ]);
-                        
-                        // Format kode menjadi format yang mudah dibaca (XXXX-XXXX)
-                        const formattedCode = pairingCode?.match(/.{1,4}/g)?.join('-') || pairingCode;
-                        
-                        console.log(`\n╔══════════════════════════════╗`);
-                        console.log(`║     📲 KODE PAIRING ANDA     ║`);
-                        console.log(`╠══════════════════════════════╣`);
-                        console.log(`║                              ║`);
-                        console.log(`║   \x1b[32m${formattedCode}\x1b[0m   ║`);
-                        console.log(`║                              ║`);
-                        console.log(`╚══════════════════════════════╝\n`);
-                        console.log(`⏱️ Kode akan expired dalam 60 detik`);
-                        console.log(`📱 Buka WhatsApp > 3 titik > Perangkat tertaut > Hubungkan perangkat`);
-                        console.log(`\n⏳ Menunggu koneksi... (max 60 detik)`);
-                        
-                        return true;
-                    } catch (error) {
-                        attempts++;
-                        console.error(`❌ Percobaan ${attempts} gagal:`, error.message);
-                        
-                        if (error.message.includes('400')) {
-                            console.log('⚠️ Kemungkinan nomor tidak valid atau format salah');
-                            console.log('📝 Pastikan nomor menggunakan kode negara (contoh: 628123456789)');
-                        } else if (error.message.includes('Timeout')) {
-                            console.log('⚠️ Koneksi timeout, coba lagi...');
-                        }
-                        
-                        if (attempts < maxAttempts) {
-                            console.log(`⏳ Mencoba lagi dalam 5 detik...`);
-                            await new Promise(resolve => setTimeout(resolve, 5000));
-                        }
-                    }
-                }
-                
-                console.log('❌ Gagal mendapatkan kode pairing setelah 3 percobaan');
-                return false;
-            };
-
-            // Ambil nomor dari config atau input manual
-            let numberToUse = phoneNumber;
-            
-            if (!numberToUse) {
-                numberToUse = await question('\n[?] Masukkan Nomor WhatsApp Bot (Contoh: 628123456789):\n> ');
-            }
-            
-            // Bersihkan input
-            numberToUse = numberToUse.replace(/\D/g, '');
-            
-            if (!validatePhoneNumber(numberToUse)) {
-                console.log("❌ Nomor tidak valid! Pastikan panjang antara 8-15 digit.");
-                console.log("   Contoh: 628123456789 (Indonesia)");
-                process.exit(0);
-            }
-
-            // Tunggu sebentar sebelum meminta kode
-            setTimeout(async () => {
-                const success = await requestPairingCodeWithRetry(numberToUse);
-                if (!success) {
-                    console.log('🔄 Restarting bot untuk mencoba lagi...');
-                    setTimeout(() => process.exit(1), 5000);
-                }
-            }, 2000);
-        }
-
-        // Connection update handler
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
-            if (qr && !usePairingCode) {
+            if (qr) {
                 console.log('\n╔══════════════════════╗');
                 console.log('║  📱 SCAN QR CODE    ║');
                 console.log('╚══════════════════════╝\n');
@@ -1038,17 +950,11 @@ async function startBot() {
                 console.log('🔌 Connection closed:', lastDisconnect?.error?.message || 'Unknown reason');
                 
                 if (shouldReconnect) {
-                    console.log('🔄 Reconnecting in 5 seconds...');
-                    setTimeout(() => startBot(), 5000);
+                    console.log('🔄 Reconnecting in 3 seconds...');
+                    setTimeout(() => startBot(), 3000);
                 } else {
-                    console.log('❌ Logged out, silakan login ulang');
-                    await clearData();
-                    // Jangan langsung restart, kasih waktu untuk pairing baru
-                    console.log('⏳ Menunggu 10 detik sebelum restart...');
-                    setTimeout(() => startBot(), 10000);
+                    console.log('❌ Logged out, please scan QR again');
                 }
-            } else if (connection === 'connecting') {
-                console.log('⏳ Menghubungkan ke WhatsApp...');
             } else if (connection === 'open') {
                 console.log('\n╔════════════════════════════════════════╗');
                 console.log('║  ✅ ' + BOT_NAME + ' v2.0 ONLINE!       ║');
@@ -1059,7 +965,6 @@ async function startBot() {
                 console.log(`║  🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'ACTIVE ✓' : 'INACTIVE'} ║`);
                 console.log('║  👥 Group Tools Ready ✓                 ║');
                 console.log('║  💾 MongoDB Connected ✓                 ║');
-                console.log(`║  📱 Mode: ${usePairingCode ? 'PAIRING' : 'QR SCAN'} ✓            ║`);
                 console.log('╚════════════════════════════════════════╝\n');
                 
                 try {
@@ -1082,7 +987,6 @@ async function startBot() {
                         `🤖 Auto Reply ViewOnce: ${AUTO_REPLY_VIEWONCE ? 'Active ✓' : 'Inactive'}\n` +
                         '👥 Group Tools: Ready ✓\n' +
                         '💾 Database: MongoDB ✓\n' +
-                        `📱 Login Mode: ${usePairingCode ? 'Pairing Code ✓' : 'QR Scan ✓'}\n` +
                         '━━━━━━━━━━━━━━━━━━━━';
                     
                     await sock.sendMessage(OWNER_JID, { text: statusMsg });
@@ -1190,7 +1094,7 @@ async function startBot() {
             }
         });
 
-        // Handle message updates (anti-delete)
+        // Handle message updates
         sock.ev.on('messages.update', async (updates) => {
             for (const update of updates) {
                 try {
@@ -1243,7 +1147,7 @@ async function startBot() {
                     
                     if (!m.message) continue;
                     
-                    // 🚨 ANTI VIEWONCE HANDLER
+                    // 🚨 ANTI VIEWONCE HANDLER - DIPANGGIL DI AWAL
                     if (ANTI_VIEWONCE_ENABLED) {
                         await saveViewOnceMedia(sock, m);
                     }
@@ -1288,6 +1192,8 @@ async function startBot() {
                     
                     // ==================== MENU ====================
                     if (command === '.menu' || command === '.help') {
+                        console.log(`📋 Menu command from: ${pushName}`);
+                        
                         try {
                             const greeting = getGreeting();
                             const dateInfo = getFormattedDate();
@@ -1380,7 +1286,6 @@ async function startBot() {
                                 '👤 Owner: wa.me/' + OWNER_NUMBER + '\n' +
                                 '💾 Database: MongoDB\n' +
                                 '🤖 AI Powered Bot v2.0\n' +
-                                `📱 Login Mode: ${usePairingCode ? 'Pairing Code' : 'QR Scan'}\n` +
                                 '━━━━━━━━━━━━━━━━━━━━';
                             
                             await sock.sendMessage(sender, { text: menuText });
@@ -1390,9 +1295,1617 @@ async function startBot() {
                         continue;
                     }
                     
-                    // Untuk command lainnya, Anda bisa menambahkan di sini
-                    // Saya tidak menyertakan semua command handler karena akan terlalu panjang
-                    // Tapi struktur command handler sudah ada di kode sebelumnya
+                    // ==================== VIEW ONCE COMMANDS ====================
+                    
+                    // TOGGLE AUTO REPLY
+                    if (command === '.autoreply') {
+                        if (!isOwner) {
+                            await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa mengatur auto reply!' });
+                            continue;
+                        }
+                        
+                        const action = args[0];
+                        if (action === 'on') {
+                            AUTO_REPLY_VIEWONCE = true;
+                            await sock.sendMessage(sender, { 
+                                text: '✅ *Auto Reply ViewOnce diaktifkan!*\n\nBot akan membalas otomatis dengan isi viewonce.' 
+                            });
+                        } else if (action === 'off') {
+                            AUTO_REPLY_VIEWONCE = false;
+                            await sock.sendMessage(sender, { 
+                                text: '❌ *Auto Reply ViewOnce dinonaktifkan!*\n\nBot hanya akan menyimpan tanpa membalas.' 
+                            });
+                        } else if (action === 'status') {
+                            const status = AUTO_REPLY_VIEWONCE ? 'AKTIF ✅' : 'NONAKTIF ❌';
+                            await sock.sendMessage(sender, { 
+                                text: `📊 *Status Auto Reply ViewOnce*\n\nStatus: ${status}\n\nKonfigurasi:\n• Grup: ${AUTO_REPLY_IN_GROUP ? 'YA' : 'TIDAK'}\n• Private: ${AUTO_REPLY_IN_PRIVATE ? 'YA' : 'TIDAK'}\n• Quote: ${AUTO_REPLY_AS_QUOTE ? 'YA' : 'TIDAK'}` 
+                            });
+                        } else {
+                            await sock.sendMessage(sender, { 
+                                text: '⚙️ *Auto Reply ViewOnce*\n\nPenggunaan:\n• .autoreply on - Aktifkan\n• .autoreply off - Nonaktifkan\n• .autoreply status - Cek status' 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // LIST VIEW ONCE
+                    if (command === '.viewonce') {
+                        const subCommand = args[0] || 'list';
+                        
+                        if (subCommand === 'list') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa melihat list viewonce!' });
+                                continue;
+                            }
+                            
+                            const savedCount = Array.from(viewOnceMessages.values()).length;
+                            const fileCount = fs.existsSync(VIEWONCE_SAVE_FOLDER) ? 
+                                fs.readdirSync(VIEWONCE_SAVE_FOLDER).filter(f => f.startsWith('viewonce_')).length : 0;
+                            
+                            let listText = `🚨 *VIEW ONCE SAVED MEDIA*\n\n`;
+                            listText += `📊 Stats:\n`;
+                            listText += `├ Total Saved: ${savedCount}\n`;
+                            listText += `├ Files in Folder: ${fileCount}\n`;
+                            listText += `└ Folder: ${VIEWONCE_SAVE_FOLDER}\n\n`;
+                            
+                            if (savedCount > 0) {
+                                listText += `📋 Latest 5:\n`;
+                                const latest = Array.from(viewOnceMessages.entries()).slice(-5).reverse();
+                                
+                                latest.forEach(([id, data], index) => {
+                                    const time = new Date(data.timestamp).toLocaleTimeString('id-ID');
+                                    listText += `${index + 1}. ${data.senderName} (${time})\n`;
+                                    listText += `   📁 ${data.mediaType.toUpperCase()} - ${data.caption || 'No caption'}\n`;
+                                    listText += `   🔑 ID: ${id.substring(0, 8)}...\n\n`;
+                                });
+                                
+                                listText += `💡 Kirim: .viewonce send [ID]\n`;
+                                listText += `🗑️  Hapus: .viewonce clear [ID]\n`;
+                            } else {
+                                listText += `📭 Tidak ada media viewonce yang disimpan.\n`;
+                            }
+                            
+                            listText += `\n🌐 Web Access: http://localhost:${PORT}/viewonce`;
+                            
+                            await sock.sendMessage(sender, { text: listText });
+                            continue;
+                        }
+                        
+                        // SEND VIEW ONCE
+                        else if (subCommand === 'send') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa mengirim viewonce!' });
+                                continue;
+                            }
+                            
+                            const targetId = args[1];
+                            if (!targetId) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Format: .viewonce send [message_id]\n💡 Gunakan .viewonce list untuk melihat ID' 
+                                });
+                                continue;
+                            }
+                            
+                            const savedMedia = viewOnceMessages.get(targetId);
+                            if (!savedMedia) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ ID tidak ditemukan! Gunakan .viewonce list untuk melihat ID yang valid' 
+                                });
+                                continue;
+                            }
+                            
+                            try {
+                                const mediaBuffer = fs.readFileSync(savedMedia.filePath);
+                                const caption = `🚨 View Once Saved\n👤 From: ${savedMedia.senderName}\n⏰ Time: ${new Date(savedMedia.timestamp).toLocaleString('id-ID')}\n💬 Caption: ${savedMedia.caption || 'No caption'}`;
+                                
+                                if (savedMedia.mediaType === 'image') {
+                                    await sock.sendMessage(sender, {
+                                        image: mediaBuffer,
+                                        caption: caption
+                                    });
+                                    await sock.sendMessage(sender, { 
+                                        text: `✅ Image viewonce berhasil dikirim!\n📁 File: ${path.basename(savedMedia.filePath)}` 
+                                    });
+                                } else if (savedMedia.mediaType === 'video') {
+                                    await sock.sendMessage(sender, {
+                                        video: mediaBuffer,
+                                        caption: caption
+                                    });
+                                    await sock.sendMessage(sender, { 
+                                        text: `✅ Video viewonce berhasil dikirim!\n📁 File: ${path.basename(savedMedia.filePath)}` 
+                                    });
+                                }
+                            } catch (error) {
+                                console.error('Error sending viewonce:', error);
+                                await sock.sendMessage(sender, { 
+                                    text: `❌ Gagal mengirim viewonce: ${error.message}` 
+                                });
+                            }
+                            continue;
+                        }
+                        
+                        // CLEAR VIEW ONCE
+                        else if (subCommand === 'clear') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa menghapus viewonce!' });
+                                continue;
+                            }
+                            
+                            const targetId = args[1];
+                            if (!targetId) {
+                                // Clear all
+                                const count = viewOnceMessages.size;
+                                const files = fs.readdirSync(VIEWONCE_SAVE_FOLDER)
+                                    .filter(f => f.startsWith('viewonce_'));
+                                
+                                files.forEach(f => {
+                                    try {
+                                        fs.unlinkSync(path.join(VIEWONCE_SAVE_FOLDER, f));
+                                    } catch (e) {
+                                        console.error('Error deleting file:', e.message);
+                                    }
+                                });
+                                
+                                viewOnceMessages.clear();
+                                await sock.sendMessage(sender, { 
+                                    text: `✅ Semua viewonce telah dihapus!\n🗑️  ${count} item dihapus` 
+                                });
+                            } else {
+                                // Clear specific
+                                const savedMedia = viewOnceMessages.get(targetId);
+                                if (savedMedia) {
+                                    try {
+                                        if (fs.existsSync(savedMedia.filePath)) {
+                                            fs.unlinkSync(savedMedia.filePath);
+                                        }
+                                        viewOnceMessages.delete(targetId);
+                                        await sock.sendMessage(sender, { 
+                                            text: `✅ Viewonce dengan ID ${targetId.substring(0, 8)}... telah dihapus!` 
+                                        });
+                                    } catch (error) {
+                                        await sock.sendMessage(sender, { 
+                                            text: `❌ Gagal menghapus: ${error.message}` 
+                                        });
+                                    }
+                                } else {
+                                    await sock.sendMessage(sender, { 
+                                        text: '❌ ID tidak ditemukan!' 
+                                    });
+                                }
+                            }
+                            continue;
+                        }
+                        
+                        // FORWARD VIEW ONCE TO GROUP
+                        else if (subCommand === 'forward') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa forward viewonce!' });
+                                continue;
+                            }
+                            
+                            if (!isGroup) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya bisa di dalam grup!' });
+                                continue;
+                            }
+                            
+                            const targetId = args[1];
+                            if (!targetId) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Format: .viewonce forward [message_id]\n💡 Gunakan .viewonce list untuk melihat ID' 
+                                });
+                                continue;
+                            }
+                            
+                            const savedMedia = viewOnceMessages.get(targetId);
+                            if (!savedMedia) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ ID tidak ditemukan!' 
+                                });
+                                continue;
+                            }
+                            
+                            try {
+                                const mediaBuffer = fs.readFileSync(savedMedia.filePath);
+                                const caption = `📸 Media dari View Once\n👤 Pengirim: ${savedMedia.senderName}\n⏰ Waktu: ${new Date(savedMedia.timestamp).toLocaleTimeString('id-ID')}\n💬 ${savedMedia.caption || ''}`;
+                                
+                                if (savedMedia.mediaType === 'image') {
+                                    await sock.sendMessage(sender, {
+                                        image: mediaBuffer,
+                                        caption: caption
+                                    });
+                                } else if (savedMedia.mediaType === 'video') {
+                                    await sock.sendMessage(sender, {
+                                        video: mediaBuffer,
+                                        caption: caption
+                                    });
+                                }
+                                
+                                await sock.sendMessage(sender, { 
+                                    text: `✅ Viewonce berhasil di-forward ke grup!\n👤 From: ${savedMedia.senderName}` 
+                                });
+                            } catch (error) {
+                                console.error('Error forwarding viewonce:', error);
+                                await sock.sendMessage(sender, { 
+                                    text: `❌ Gagal forward: ${error.message}` 
+                                });
+                            }
+                            continue;
+                        }
+                        
+                        // GET VIEWONCE BY USER
+                        else if (subCommand === 'user') {
+                            if (!isOwner) {
+                                await sock.sendMessage(sender, { text: '❌ Hanya owner yang bisa melihat viewonce by user!' });
+                                continue;
+                            }
+                            
+                            const targetUser = args[1];
+                            if (!targetUser) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ Format: .viewonce user [nomor/username]\nContoh: .viewonce user 628123456789' 
+                                });
+                                continue;
+                            }
+                            
+                            const userViewonces = Array.from(viewOnceMessages.entries())
+                                .filter(([id, data]) => 
+                                    data.senderName.toLowerCase().includes(targetUser.toLowerCase()) ||
+                                    data.sender.includes(targetUser)
+                                );
+                            
+                            if (userViewonces.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: `❌ Tidak ditemukan viewonce dari ${targetUser}` 
+                                });
+                                continue;
+                            }
+                            
+                            let userText = `👤 *VIEW ONCE DARI ${targetUser}*\n\n`;
+                            userText += `📊 Total: ${userViewonces.length}\n\n`;
+                            
+                            userViewonces.slice(-10).reverse().forEach(([id, data], index) => {
+                                const time = new Date(data.timestamp).toLocaleTimeString('id-ID');
+                                userText += `${index + 1}. ${data.mediaType.toUpperCase()} (${time})\n`;
+                                userText += `   💬 ${data.caption || 'No caption'}\n`;
+                                userText += `   🔑 ID: ${id.substring(0, 8)}...\n\n`;
+                            });
+                            
+                            userText += `💡 Kirim: .viewonce send [ID]`;
+                            
+                            await sock.sendMessage(sender, { text: userText });
+                            continue;
+                        }
+                    }
+                    
+                    // ==================== RESET SESSION (OWNER ONLY) ====================
+                    if (command === '.resetsession' && isOwner) {
+                        try {
+                            await sock.sendMessage(sender, { text: '🔄 *Mereset session MongoDB...*' });
+                            await clearData();
+                            await sock.sendMessage(sender, { 
+                                text: '✅ Session dihapus dari MongoDB!\n\nBot akan restart & QR baru akan muncul dalam 5 detik...' 
+                            });
+                            setTimeout(() => process.exit(1), 5000);
+                        } catch (e) {
+                            console.error('❌ Gagal reset session:', e.message);
+                            await sock.sendMessage(sender, { text: `❌ Gagal reset: ${e.message}` });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== WELCOME COMMANDS ====================
+                    if (command === '.enablewelcome') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        welcomeEnabled.set(sender, true);
+                        await sock.sendMessage(sender, { text: '✅ *Fitur Welcome diaktifkan!*' });
+                        continue;
+                    }
+                    
+                    if (command === '.disablewelcome') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        welcomeEnabled.set(sender, false);
+                        await sock.sendMessage(sender, { text: '❌ *Fitur Welcome dinonaktifkan!*' });
+                        continue;
+                    }
+                    
+                    if (command === '.welcomestatus') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        const status = welcomeEnabled.get(sender) !== false;
+                        await sock.sendMessage(sender, { 
+                            text: `📊 *Status Fitur Welcome*\n\nGrup: ${isGroup ? '✅' : '❌'}\nFitur Welcome: ${status ? '✅ AKTIF' : '❌ NONAKTIF'}` 
+                        });
+                        continue;
+                    }
+                    
+                    // ==================== GAME ANSWER HANDLER (NON-COMMAND) ====================
+                    const activeGame = gameSystem.getGame(sender);
+                    
+                    if (activeGame && !text.startsWith('.') && text.trim()) {
+                        // Process game answer
+                        const isCorrect = gameSystem.checkAnswer(activeGame, text);
+                        
+                        if (isCorrect) {
+                            // Give rewards melalui RPG system
+                            await rpgSystem.addCoins(userId, activeGame.points || 50);
+                            await rpgSystem.addExp(userId, 10);
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `✅ *BENAR!*\n\n🏆 +${activeGame.points || 50} coins\n⭐ +10 EXP\n\n🎉 Selamat!` 
+                            });
+                            
+                            gameSystem.removeGame(sender);
+                        } else {
+                            // Handle wrong answer berdasarkan game type
+                            switch(activeGame.type) {
+                                case 'tebak-angka':
+                                    const guess = parseInt(text);
+                                    if (!isNaN(guess)) {
+                                        const hint = guess > activeGame.number ? 'KECIL' : 'BESAR';
+                                        await sock.sendMessage(sender, { 
+                                            text: `📉 Tebakanmu terlalu ${hint}! Coba lagi.\n\nKesempatan: ${activeGame.attempts + 1}/${activeGame.maxAttempts}` 
+                                        });
+                                        activeGame.attempts++;
+                                        
+                                        if (activeGame.attempts >= activeGame.maxAttempts) {
+                                            await sock.sendMessage(sender, { 
+                                                text: `💀 GAME OVER!\nAngka yang benar: ${activeGame.number}\n\n💡 Ketik .tebakangka untuk bermain lagi` 
+                                            });
+                                            gameSystem.removeGame(sender);
+                                        }
+                                    }
+                                    break;
+                                case 'tebak-kata':
+                                    activeGame.attempts++;
+                                    if (activeGame.attempts >= activeGame.maxAttempts) {
+                                        await sock.sendMessage(sender, { 
+                                            text: `💀 GAME OVER!\nKata yang benar: ${activeGame.answer}\n\n💡 Ketik .tebakkata untuk bermain lagi` 
+                                        });
+                                        gameSystem.removeGame(sender);
+                                    } else {
+                                        await sock.sendMessage(sender, { 
+                                            text: `❌ Salah! Kesempatan tersisa: ${activeGame.maxAttempts - activeGame.attempts}\n💡 Hint: ${gameSystem.getHint(activeGame)}` 
+                                        });
+                                    }
+                                    break;
+                                default:
+                                    await sock.sendMessage(sender, { 
+                                        text: '❌ Salah! Coba lagi.' 
+                                    });
+                            }
+                        }
+                        continue; // Skip processing lainnya
+                    }
+                    
+                    // ==================== GAME COMMAND HANDLERS ====================
+                    
+                    // 1) Tebak Kata
+                    if (command === '.tebakkata' || command === '.tkata') {
+                        await gameSystem.startTebakKata(sender);
+                        continue;
+                    }
+                    
+                    // 2) Tebak Gambar
+                    if (command === '.tebakgambar' || command === '.tgambar') {
+                        const mode = args[0] || 'easy';
+                        if (!['easy', 'medium', 'hard'].includes(mode)) {
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Mode tidak valid!\n\n💡 Gunakan: .tebakgambar [easy/medium/hard]' 
+                            });
+                            continue;
+                        }
+                        await gameSystem.startTebakGambar(sender, mode);
+                        continue;
+                    }
+                    
+                    // 3) Quiz
+                    if (command === '.quiz' || command === '.kuis') {
+                        const category = args[0] || 'random';
+                        await gameSystem.startQuiz(sender, category);
+                        continue;
+                    }
+                    
+                    // 4) Truth or Dare
+                    if (command === '.truth') {
+                        const truth = await gameSystem.getTruthOrDare('truth');
+                        await sock.sendMessage(sender, { 
+                            text: `🤫 *TRUTH*\n\n${truth.text}\n\n💬 Jawab dengan jujur!` 
+                        });
+                        continue;
+                    }
+                    
+                    if (command === '.dare') {
+                        const dare = await gameSystem.getTruthOrDare('dare');
+                        await sock.sendMessage(sender, { 
+                            text: `😈 *DARE*\n\n${dare.text}\n\n⚡ Lakukan dalam 5 menit!` 
+                        });
+                        continue;
+                    }
+                    
+                    // 5) Tebak Lagu
+                    if (command === '.tebaklagu' || command === '.tlagu') {
+                        await gameSystem.startTebakLagu(sender);
+                        continue;
+                    }
+                    
+                    // 6) Tebak Bendera
+                    if (command === '.tebakbendera' || command === '.tbendera') {
+                        await gameSystem.startTebakBendera(sender);
+                        continue;
+                    }
+                    
+                    // 7) Tebak Emoji
+                    if (command === '.tebakemoji' || command === '.temoji') {
+                        await gameSystem.startTebakEmoji(sender);
+                        continue;
+                    }
+                    
+                    // 8) Tebak Lirik
+                    if (command === '.tebaklirik' || command === '.tlirik') {
+                        await gameSystem.startTebakLirik(sender);
+                        continue;
+                    }
+                    
+                    // 9) Math Battle
+                    if (command === '.math' || command === '.mathbattle') {
+                        await gameSystem.startMathBattle(sender);
+                        continue;
+                    }
+                    
+                    // 10) Suit
+                    if (command === '.suit') {
+                        if (!['batu', 'gunting', 'kertas'].includes(args[0])) {
+                            await sock.sendMessage(sender, { 
+                                text: '✊✌️✋ *SUIT*\n\nPilihan:\n• batu\n• gunting\n• kertas\n\nContoh: .suit batu' 
+                            });
+                            continue;
+                        }
+                        
+                        const result = await gameSystem.playSuit(sender, args[0]);
+                        
+                        if (result.winner === 'player') {
+                            await rpgSystem.addCoins(userId, 30);
+                            await rpgSystem.addExp(userId, 5);
+                            result.message += `\n\n🏆 +30 coins\n⭐ +5 EXP`;
+                        }
+                        
+                        await sock.sendMessage(sender, { text: result.message });
+                        continue;
+                    }
+                    
+                    // 11) Tebak Angka
+                    if (command === '.tebakangka' || command === '.tangka') {
+                        await gameSystem.startTebakAngka(sender);
+                        continue;
+                    }
+                    
+                    // 12) Game Hint
+                    if (command === '.hint') {
+                        const game = gameSystem.getGame(sender);
+                        if (game) {
+                            const hint = gameSystem.getHint(game);
+                            await sock.sendMessage(sender, { text: `💡 ${hint}` });
+                        } else {
+                            await sock.sendMessage(sender, { text: '❌ Tidak ada game yang aktif!' });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== RPG SYSTEM HANDLERS ====================
+                    
+                    // Profile
+                    if (command === '.profile' || command === '.myprofile') {
+                        const profile = await rpgSystem.getProfile(userId);
+                        
+                        const profileText = 
+                            `👤 *PROFILE*\n\n` +
+                            `📛 Name: ${profile.username}\n` +
+                            `🎯 Level: ${profile.level}\n` +
+                            `📊 EXP: ${profile.exp}/${profile.expNeeded} (${profile.expPercent}%)\n` +
+                            `💰 Coins: ${profile.coins}\n` +
+                            `🔥 Streak: ${profile.dailyStreak} hari\n\n` +
+                            `📈 Stats:\n` +
+                            `├ Games Won: ${profile.stats.gamesWon}\n` +
+                            `├ Games Played: ${profile.stats.gamesPlayed}\n` +
+                            `└ Total Coins: ${profile.stats.totalCoins}\n\n` +
+                            `📦 Inventory: ${profile.inventoryCount} items\n` +
+                            `🐾 Pet: ${profile.pet || 'Tidak ada'}`;
+                        
+                        await sock.sendMessage(sender, { text: profileText });
+                        continue;
+                    }
+                    
+                    // Daily Reward
+                    if (command === '.daily' || command === '.hadiah') {
+                        const result = await rpgSystem.claimDaily(userId);
+                        
+                        if (result.success) {
+                            const text = 
+                                `🎁 *DAILY REWARD*\n\n` +
+                                `💰 Coins: +${result.coins}\n` +
+                                `⭐ EXP: +${result.exp}\n` +
+                                `🔥 Streak: ${result.streak} hari\n\n` +
+                                `✅ Klaim berhasil!\n` +
+                                `⏰ Kembali besok untuk hadiah lebih besar!`;
+                            
+                            await sock.sendMessage(sender, { text });
+                        } else {
+                            await sock.sendMessage(sender, { 
+                                text: `⏳ Tunggu ${result.hoursLeft} jam lagi untuk klaim daily!` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // Work
+                    if (command === '.work' || command === '.kerja') {
+                        const result = await rpgSystem.work(userId);
+                        
+                        if (result.success) {
+                            const text = 
+                                `💼 *WORK*\n\n` +
+                                `Pekerjaan: ${result.job}\n` +
+                                `💰 Coins: +${result.coins}\n` +
+                                `⭐ EXP: +${result.exp}\n\n` +
+                                `⏰ Cooldown: 5 menit`;
+                            
+                            await sock.sendMessage(sender, { text });
+                        } else {
+                            await sock.sendMessage(sender, { 
+                                text: `⏳ Tunggu ${result.minutesLeft} menit lagi untuk kerja!` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // Hunt
+                    if (command === '.hunt' || command === '.berburu') {
+                        const result = await rpgSystem.hunt(userId);
+                        
+                        if (result.success) {
+                            if (result.caught) {
+                                const rareText = result.rare ? '✨ *ITEM LANGKA!* ✨\n' : '';
+                                const text = 
+                                    `🏹 *HUNT*\n\n` +
+                                    rareText +
+                                    `🎯 Berhasil menangkap: ${result.item}\n` +
+                                    `💰 Coins: +${result.coins}\n` +
+                                    `⭐ EXP: +${result.exp}\n\n` +
+                                    `⏰ Cooldown: 10 menit`;
+                                
+                                await sock.sendMessage(sender, { text });
+                            } else {
+                                await sock.sendMessage(sender, { 
+                                    text: `🏹 *HUNT*\n\n${result.message}\n\n⏰ Cooldown: 10 menit` 
+                                });
+                            }
+                        } else {
+                            await sock.sendMessage(sender, { 
+                                text: `⏳ Tunggu ${result.minutesLeft} menit lagi untuk berburu!` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // Fight (PvP)
+                    if (command === '.fight' || command === '.pvp') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        
+                        const mentionedJid = msg.extendedTextMessage?.contextInfo?.mentionedJid?.[0];
+                        if (!mentionedJid) {
+                            await sock.sendMessage(sender, { 
+                                text: '⚔️ *FIGHT*\n\nTag lawanmu!\nContoh: .fight @user' 
+                            });
+                            continue;
+                        }
+                        
+                        if (mentionedJid === userId) {
+                            await sock.sendMessage(sender, { text: '❌ Tidak bisa fight diri sendiri!' });
+                            continue;
+                        }
+                        
+                        try {
+                            await rpgSystem.getUser(mentionedJid);
+                        } catch {
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Lawan belum terdaftar di RPG system!' 
+                            });
+                            continue;
+                        }
+                        
+                        const result = await rpgSystem.fight(userId, mentionedJid);
+                        
+                        const winnerName = result.winner.split('@')[0];
+                        const loserName = result.loser.split('@')[0];
+                        
+                        const text = 
+                            `⚔️ *BATTLE RESULT*\n\n` +
+                            `🏆 Winner: @${winnerName}\n` +
+                            `💀 Loser: @${loserName}\n\n` +
+                            `💰 Coins: +${result.coins} (winner) / -${result.coins} (loser)\n` +
+                            `⭐ EXP: +${result.exp.winner} (winner) / +${result.exp.loser} (loser)`;
+                        
+                        await sock.sendMessage(sender, { 
+                            text: text,
+                            mentions: [result.winner, result.loser]
+                        });
+                        continue;
+                    }
+                    
+                    // Shop
+                    if (command === '.shop' || command === '.toko') {
+                        const shopItems = [
+                            { id: 1, name: '🍎 Apel Penyembuh', price: 50, desc: 'Menyembuhkan 50 HP' },
+                            { id: 2, name: '⚔️ Pedang Besi', price: 200, desc: 'Attack +10' },
+                            { id: 3, name: '🛡️ Perunggu Shield', price: 150, desc: 'Defense +5' },
+                            { id: 4, name: '💎 Diamond', price: 500, desc: 'Item langka untuk upgrade' },
+                            { id: 5, name: '🐾 Pet Egg', price: 1000, desc: 'Menetas menjadi pet' }
+                        ];
+                        
+                        let shopText = `🛒 *SHOP*\n\n`;
+                        shopItems.forEach(item => {
+                            shopText += `${item.id}. ${item.name}\n💰 ${item.price} coins\n📝 ${item.desc}\n\n`;
+                        });
+                        
+                        shopText += `💡 Beli dengan: .buy [id]\n💰 Cek coins: .profile`;
+                        
+                        await sock.sendMessage(sender, { text: shopText });
+                        continue;
+                    }
+                    
+                    // Buy from shop
+                    if (command === '.buy' || command === '.beli') {
+                        const itemId = parseInt(args[0]);
+                        const user = await rpgSystem.getUser(userId);
+                        
+                        const shopItems = [
+                            { id: 1, name: '🍎 Apel Penyembuh', price: 50 },
+                            { id: 2, name: '⚔️ Pedang Besi', price: 200 },
+                            { id: 3, name: '🛡️ Perunggu Shield', price: 150 },
+                            { id: 4, name: '💎 Diamond', price: 500 },
+                            { id: 5, name: '🐾 Pet Egg', price: 1000 }
+                        ];
+                        
+                        const item = shopItems.find(i => i.id === itemId);
+                        
+                        if (!item) {
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Item tidak ditemukan!\n💡 Lihat .shop untuk daftar item' 
+                            });
+                            continue;
+                        }
+                        
+                        if (user.coins < item.price) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Coins tidak cukup!\n💰 Kamu punya: ${user.coins} coins\n💵 Dibutuhkan: ${item.price} coins` 
+                            });
+                            continue;
+                        }
+                        
+                        await rpgSystem.updateUser(userId, {
+                            coins: user.coins - item.price
+                        });
+                        
+                        await sock.sendMessage(sender, { 
+                            text: `✅ Berhasil membeli ${item.name}!\n💰 -${item.price} coins\n📦 Item ditambahkan ke inventory` 
+                        });
+                        continue;
+                    }
+                    
+                    // Inventory
+                    if (command === '.inventory' || command === '.inv') {
+                        const user = await rpgSystem.getProfile(userId);
+                        let invText = `📦 *INVENTORY*\n\n`;
+                        
+                        if (user.inventoryCount === 0) {
+                            invText += `Kosong! Beli item di .shop`;
+                        } else {
+                            invText += `Total items: ${user.inventoryCount}\n`;
+                            invText += `💡 Gunakan item dengan .use [nama]`;
+                        }
+                        
+                        invText += `\n💰 Coins: ${user.coins}`;
+                        
+                        await sock.sendMessage(sender, { text: invText });
+                        continue;
+                    }
+                    
+                    // Leaderboard
+                    if (command === '.leaderboard' || command === '.top') {
+                        const type = args[0] || 'coins';
+                        const topUsers = await rpgSystem.getLeaderboard(type, 10);
+                        
+                        let leaderboardText = `🏆 *LEADERBOARD*\n\n`;
+                        leaderboardText += `📊 Kategori: ${type.toUpperCase()}\n\n`;
+                        
+                        topUsers.forEach(user => {
+                            let value = '';
+                            switch(type) {
+                                case 'coins': value = `💰 ${user.coins}`; break;
+                                case 'level': value = `🎯 Level ${user.level}`; break;
+                                case 'streak': value = `🔥 ${user.streak} hari`; break;
+                            }
+                            
+                            leaderboardText += `${user.rank}. ${user.username}\n${value}\n\n`;
+                        });
+                        
+                        await sock.sendMessage(sender, { text: leaderboardText });
+                        continue;
+                    }
+                    
+                    // Spin / Gacha
+                    if (command === '.spin' || command === '.gacha') {
+                        const user = await rpgSystem.getUser(userId);
+                        
+                        if (user.coins < 50) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Coins tidak cukup!\n💰 Dibutuhkan: 50 coins\n💵 Kamu punya: ${user.coins} coins` 
+                            });
+                            continue;
+                        }
+                        
+                        const rewards = [
+                            { name: '💰 10 coins', value: 10, type: 'coins' },
+                            { name: '💰 50 coins', value: 50, type: 'coins' },
+                            { name: '💰 100 coins', value: 100, type: 'coins' },
+                            { name: '⭐ 20 EXP', value: 20, type: 'exp' },
+                            { name: '⭐ 50 EXP', value: 50, type: 'exp' },
+                            { name: '🍎 Apel', value: 'apple', type: 'item' },
+                            { name: '✨ Rare Item', value: 'rare', type: 'item', rare: true }
+                        ];
+                        
+                        const reward = rewards[Math.floor(Math.random() * rewards.length)];
+                        
+                        await rpgSystem.updateUser(userId, {
+                            coins: user.coins - 50
+                        });
+                        
+                        let rewardText = `🎰 *SPIN RESULT*\n\n`;
+                        rewardText += `Kamu mendapatkan: ${reward.name}\n`;
+                        
+                        if (reward.type === 'coins') {
+                            await rpgSystem.addCoins(userId, reward.value);
+                            rewardText += `💰 +${reward.value} coins`;
+                        } else if (reward.type === 'exp') {
+                            await rpgSystem.addExp(userId, reward.value);
+                            rewardText += `⭐ +${reward.value} EXP`;
+                        } else if (reward.type === 'item') {
+                            rewardText += `🎁 Item telah ditambahkan ke inventory`;
+                            if (reward.rare) {
+                                rewardText += `\n✨ *ITEM LANGKA!*`;
+                            }
+                        }
+                        
+                        rewardText += `\n\n💰 Biaya spin: -50 coins`;
+                        
+                        await sock.sendMessage(sender, { text: rewardText });
+                        continue;
+                    }
+                    
+                    // ==================== DOWNLOADER ====================
+                    
+                    // YTMP3
+                    if (command === '.ytmp3' && args[0]) {
+                        try {
+                            let url = args[0];
+                            if (url.includes('youtu.be')) {
+                                const videoId = url.split('/').pop().split('?')[0];
+                                url = `https://www.youtube.com/watch?v=${videoId}`;
+                            }
+                            
+                            if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL YouTube tidak valid!' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload audio YouTube...*' 
+                            });
+                            
+                            const result = await downloadYouTube(url, 'mp3');
+                            
+                            const infoText = 
+                                `✅ *Download Berhasil!*\n\n` +
+                                `📝 Title: ${result.title}\n` +
+                                `⏱️ Duration: ${result.duration}\n\n` +
+                                `📥 Mengirim audio...`;
+                            
+                            await sock.sendMessage(sender, { text: infoText });
+                            
+                            const audioBuffer = await downloadMedia(result.url, {
+                                timeout: 120000,
+                                maxContentLength: 50 * 1024 * 1024
+                            });
+                            
+                            await sock.sendMessage(sender, {
+                                audio: audioBuffer,
+                                mimetype: 'audio/mpeg',
+                                fileName: `${result.title.substring(0, 50).replace(/[^\w\s]/gi, '')}.mp3`
+                            });
+                            
+                        } catch (error) {
+                            console.error('YouTube MP3 error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download audio!\n\nError: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // YTMP4
+                    if (command === '.ytmp4' && args[0]) {
+                        try {
+                            let url = args[0];
+                            if (url.includes('youtu.be')) {
+                                const videoId = url.split('/').pop().split('?')[0];
+                                url = `https://www.youtube.com/watch?v=${videoId}`;
+                            }
+                            
+                            if (!url.includes('youtube.com') && !url.includes('youtu.be')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL YouTube tidak valid!' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload video YouTube...*' 
+                            });
+                            
+                            const result = await downloadYouTube(url, 'mp4');
+                            
+                            const infoText = 
+                                `✅ *Download Berhasil!*\n\n` +
+                                `📝 Title: ${result.title}\n` +
+                                `⏱️ Duration: ${result.duration}\n\n` +
+                                `📥 Mengirim video...`;
+                            
+                            await sock.sendMessage(sender, { text: infoText });
+                            
+                            const videoBuffer = await downloadMedia(result.url, {
+                                timeout: 120000,
+                                maxContentLength: 50 * 1024 * 1024
+                            });
+                            
+                            await sock.sendMessage(sender, {
+                                video: videoBuffer,
+                                caption: `📹 ${result.title}`,
+                                fileName: `${result.title.substring(0, 50).replace(/[^\w\s]/gi, '')}.mp4`
+                            });
+                            
+                        } catch (error) {
+                            console.error('YouTube MP4 error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download video!\n\nError: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // TIKTOK
+                    if (command === '.tiktok' && args[0]) {
+                        try {
+                            const url = args[0];
+                            if (!url.includes('tiktok.com')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL TikTok tidak valid!' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload video TikTok...*' 
+                            });
+                            
+                            const result = await downloadTikTok(url);
+                            
+                            const infoText = 
+                                `✅ *Download Berhasil!*\n\n` +
+                                `📝 Title: ${result.title}\n` +
+                                `👤 Author: ${result.author}\n` +
+                                `⏱️ Duration: ${result.duration}s`;
+                            
+                            await sock.sendMessage(sender, { text: infoText });
+                            
+                            const videoBuffer = await downloadMedia(result.url);
+                            
+                            await sock.sendMessage(sender, {
+                                video: videoBuffer,
+                                caption: `📹 TikTok - ${result.author}`,
+                                fileName: `tiktok_${Date.now()}.mp4`
+                            });
+                            
+                        } catch (error) {
+                            console.error('TikTok error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download TikTok!\n\nError: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // INSTAGRAM
+                    if (command === '.ig' && args[0]) {
+                        try {
+                            const url = args[0];
+                            if (!url.includes('instagram.com')) {
+                                await sock.sendMessage(sender, { 
+                                    text: '❌ URL Instagram tidak valid!' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: '⏳ *Mendownload dari Instagram...*' 
+                            });
+                            
+                            const result = await downloadInstagram(url);
+                            
+                            const infoText = 
+                                `✅ *Download Berhasil!*\n\n` +
+                                `📝 Title: ${result.title}\n` +
+                                `📁 Type: ${result.type.toUpperCase()}`;
+                            
+                            await sock.sendMessage(sender, { text: infoText });
+                            
+                            const mediaBuffer = await downloadMedia(result.url);
+                            
+                            if (result.type === 'video') {
+                                await sock.sendMessage(sender, {
+                                    video: mediaBuffer,
+                                    caption: `📹 Instagram Video`,
+                                    fileName: `instagram_${Date.now()}.mp4`
+                                });
+                            } else {
+                                await sock.sendMessage(sender, {
+                                    image: mediaBuffer,
+                                    caption: `📸 Instagram Photo`
+                                });
+                            }
+                            
+                        } catch (error) {
+                            console.error('Instagram error:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal download Instagram!\n\nError: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== GROUP MANAGEMENT ====================
+                    
+                    // HIDETAG
+                    if (command === '.hidetag' || command === '.ht') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        
+                        try {
+                            const groupMetadata = await sock.groupMetadata(sender);
+                            const participants = groupMetadata.participants;
+                            const mentions = participants.map(p => p.id);
+                            
+                            let hidetagMessage = '';
+                            let hasMedia = false;
+                            let mediaBuffer = null;
+                            let mediaType = null;
+                            
+                            if (msg.extendedTextMessage?.contextInfo?.quotedMessage) {
+                                const quotedMsg = msg.extendedTextMessage.contextInfo.quotedMessage;
+                                
+                                if (quotedMsg.imageMessage) {
+                                    mediaBuffer = await downloadMediaMessage(quotedMsg.imageMessage, 'image');
+                                    mediaType = 'image';
+                                    hasMedia = true;
+                                } else if (quotedMsg.videoMessage) {
+                                    mediaBuffer = await downloadMediaMessage(quotedMsg.videoMessage, 'video');
+                                    mediaType = 'video';
+                                    hasMedia = true;
+                                }
+                                
+                                const quotedText = quotedMsg.conversation || 
+                                                 (quotedMsg.extendedTextMessage?.text) || 
+                                                 (quotedMsg.imageMessage?.caption) || 
+                                                 (quotedMsg.videoMessage?.caption) || '';
+                                
+                                hidetagMessage = `📢 *PENGUMUMAN*\n\n${quotedText}\n\n━━━━━━━━━━━━━━━━\n👥 ${participants.length} members`;
+                            } else {
+                                const hidetagText = args.join(' ');
+                                
+                                if (!hidetagText) {
+                                    await sock.sendMessage(sender, { 
+                                        text: '┏━━━━━━━━━━━━━━━━┓\n' +
+                                              '┃ 🏷️ *HIDETAG*\n' +
+                                              '┣━━━━━━━━━━━━━━━━┫\n' +
+                                              '┃ .hidetag [text]\n' +
+                                              '┃ Reply + .hidetag\n' +
+                                              '┗━━━━━━━━━━━━━━━━┛'
+                                    });
+                                    continue;
+                                }
+                                
+                                hidetagMessage = `📢 *PENGUMUMAN*\n\n${hidetagText}\n\n━━━━━━━━━━━━━━━━\n👥 ${participants.length} members`;
+                            }
+                            
+                            if (hasMedia && mediaBuffer) {
+                                if (mediaType === 'image') {
+                                    await sock.sendMessage(sender, { 
+                                        image: mediaBuffer, 
+                                        caption: hidetagMessage, 
+                                        mentions 
+                                    });
+                                } else if (mediaType === 'video') {
+                                    await sock.sendMessage(sender, { 
+                                        video: mediaBuffer, 
+                                        caption: hidetagMessage, 
+                                        mentions 
+                                    });
+                                }
+                            } else {
+                                await sock.sendMessage(sender, { 
+                                    text: hidetagMessage, 
+                                    mentions 
+                                });
+                            }
+                        } catch (error) {
+                            console.error('❌ Hidetag error:', error.message);
+                        }
+                        continue;
+                    }
+                    
+                    // TAGALL
+                    if (command === '.tagall') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ *Hanya di group!*' });
+                            continue;
+                        }
+                        
+                        try {
+                            const groupMetadata = await sock.groupMetadata(sender);
+                            const participants = groupMetadata.participants;
+                            const mentions = participants.map(p => p.id);
+                            
+                            let tagText = '┏━━━━━━━━━━━━━━━━┓\n';
+                            tagText += '┃ 📢 *TAG ALL*\n';
+                            tagText += '┣━━━━━━━━━━━━━━━━┫\n';
+                            
+                            participants.forEach((participant, index) => {
+                                const number = participant.id.split('@')[0];
+                                tagText += `┃ ${index + 1}. @${number}\n`;
+                            });
+                            
+                            tagText += '┗━━━━━━━━━━━━━━━━┛\n\n';
+                            tagText += `👥 Total: ${participants.length}`;
+                            
+                            await sock.sendMessage(sender, { text: tagText, mentions });
+                        } catch (error) {
+                            console.error('❌ Tagall error:', error.message);
+                        }
+                        continue;
+                    }
+                    
+                    // KICK
+                    if (command === '.kick') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        try {
+                            const mentionedJid = msg.extendedTextMessage?.contextInfo?.mentionedJid;
+                            
+                            if (!mentionedJid || mentionedJid.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Tag user!\nContoh: .kick @user' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.groupParticipantsUpdate(sender, [mentionedJid[0]], 'remove');
+                            await sock.sendMessage(sender, { 
+                                text: `✅ @${mentionedJid[0].split('@')[0]} di-kick!`, 
+                                mentions: [mentionedJid[0]] 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // ADD
+                    if (command === '.add') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        if (!args[0]) {
+                            await sock.sendMessage(sender, { 
+                                text: '⚠️ Format: .add [nomor]\nContoh: .add 628123456789' 
+                            });
+                            continue;
+                        }
+                        
+                        try {
+                            let targetNumber = args[0].replace(/[^0-9]/g, '');
+                            if (!targetNumber.startsWith('62')) {
+                                targetNumber = '62' + targetNumber;
+                            }
+                            
+                            const targetJid = targetNumber + '@s.whatsapp.net';
+                            await sock.groupParticipantsUpdate(sender, [targetJid], 'add');
+                            await sock.sendMessage(sender, { 
+                                text: `✅ ${targetNumber} ditambahkan!` 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // PROMOTE
+                    if (command === '.promote') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        try {
+                            const mentionedJid = msg.extendedTextMessage?.contextInfo?.mentionedJid;
+                            
+                            if (!mentionedJid || mentionedJid.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Tag user!\nContoh: .promote @user' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.groupParticipantsUpdate(sender, [mentionedJid[0]], 'promote');
+                            await sock.sendMessage(sender, { 
+                                text: `✅ @${mentionedJid[0].split('@')[0]} jadi admin!`, 
+                                mentions: [mentionedJid[0]] 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // DEMOTE
+                    if (command === '.demote') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        try {
+                            const mentionedJid = msg.extendedTextMessage?.contextInfo?.mentionedJid;
+                            
+                            if (!mentionedJid || mentionedJid.length === 0) {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Tag user!\nContoh: .demote @user' 
+                                });
+                                continue;
+                            }
+                            
+                            await sock.groupParticipantsUpdate(sender, [mentionedJid[0]], 'demote');
+                            await sock.sendMessage(sender, { 
+                                text: `✅ @${mentionedJid[0].split('@')[0]} bukan admin!`, 
+                                mentions: [mentionedJid[0]] 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Error: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // LINKGC
+                    if (command === '.linkgc') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        try {
+                            const code = await sock.groupInviteCode(sender);
+                            await sock.sendMessage(sender, { 
+                                text: `🔗 *LINK GROUP*\n\nhttps://chat.whatsapp.com/${code}` 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { text: '❌ Bot bukan admin!' });
+                        }
+                        continue;
+                    }
+                    
+                    // REVOKE
+                    if (command === '.revoke') {
+                        if (!isGroup) {
+                            await sock.sendMessage(sender, { text: '⚠️ Hanya di grup!' });
+                            continue;
+                        }
+                        
+                        try {
+                            await sock.groupRevokeInvite(sender);
+                            await sock.sendMessage(sender, { text: '✅ Link grup direset!' });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { text: '❌ Bot bukan admin!' });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== TOOLS ====================
+                    
+                    // PING
+                    if (command === '.ping') {
+                        const start = Date.now();
+                        const sent = await sock.sendMessage(sender, { text: '🏓 Pinging...' });
+                        const end = Date.now();
+                        
+                        const pingText = 
+                            '┏━━━━━━━━━━━━━━━━┓\n' +
+                            '┃ 🏓 *PONG!*\n' +
+                            '┣━━━━━━━━━━━━━━━━┫\n' +
+                            `┃ ⚡ ${end - start}ms\n` +
+                            '┃ 📶 Online\n' +
+                            `┃ ⏰ ${formatRuntime(Date.now() - BOT_START_TIME)}\n` +
+                            `┃ 💾 ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)}MB\n` +
+                            '┗━━━━━━━━━━━━━━━━┛';
+                        
+                        await sock.sendMessage(sender, { text: pingText, edit: sent.key });
+                        continue;
+                    }
+                    
+                    // RUNTIME
+                    if (command === '.runtime') {
+                        const runtimeText = 
+                            '┏━━━━━━━━━━━━━━━━┓\n' +
+                            '┃ ⏰ *RUNTIME*\n' +
+                            '┣━━━━━━━━━━━━━━━━┫\n' +
+                            `┃ 🤖 ${BOT_NAME} v2.0\n` +
+                            `┃ ⏱️ ${formatRuntime(Date.now() - BOT_START_TIME)}\n` +
+                            `┃ 📅 ${new Date(BOT_START_TIME).toLocaleString('id-ID')}\n` +
+                            `┃ 💾 Database: MongoDB\n` +
+                            '┗━━━━━━━━━━━━━━━━┛';
+                        
+                        await sock.sendMessage(sender, { text: runtimeText });
+                        continue;
+                    }
+                    
+                    // SHORTLINK
+                    if (command === '.shortlink' && args[0]) {
+                        try {
+                            const url = args[0];
+                            if (!url.startsWith('http')) {
+                                throw new Error('URL harus dimulai dengan http:// atau https://');
+                            }
+                            
+                            const shortUrl = await createShortlink(url);
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `🔗 *SHORTLINK*\n\n🌐 Original: ${url}\n🔗 Short: ${shortUrl}` 
+                            });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== FUN ====================
+                    
+                    // QUOTES
+                    if (command === '.quotes') {
+                        const quotes = [
+                            "Hidup itu seperti coding, kadang ada bug tapi harus tetap di-debug! 💻",
+                            "Jangan menyerah, karena setiap error adalah pelajaran baru! 🚀",
+                            "Coding bukan tentang sempurna, tapi tentang terus belajar! ✨",
+                            "Programmer yang baik adalah programmer yang bisa baca dokumentasi! 📚",
+                            "Jika kode tidak berjalan, coba restart dan berdoa! 🙏"
+                        ];
+                        
+                        const randomQuote = quotes[Math.floor(Math.random() * quotes.length)];
+                        await sock.sendMessage(sender, { 
+                            text: `💬 *QUOTES*\n\n${randomQuote}` 
+                        });
+                        continue;
+                    }
+                    
+                    // PANTUN
+                    if (command === '.pantun') {
+                        const pantuns = [
+                            "Pergi ke pasar beli semangka\nJangan lupa beli pepaya\nRajin-rajinlah belajar koding\nAgar jadi programmer hebat!",
+                            "Minum es di siang hari\nSegar sekali di tenggorokan\nBuat kode jangan asal copy\nHarus paham dan mengerti!",
+                            "Jalan-jalan ke kota Malang\nLihat gunung yang tinggi menjulang\nKoding memang butuh kesabaran\nHasilnya pasti memuaskan!"
+                        ];
+                        
+                        const randomPantun = pantuns[Math.floor(Math.random() * pantuns.length)];
+                        await sock.sendMessage(sender, { 
+                            text: `📜 *PANTUN*\n\n${randomPantun}` 
+                        });
+                        continue;
+                    }
+                    
+                    // RATE
+                    if (command === '.rate' && args.length > 0) {
+                        const item = args.join(' ');
+                        const rating = Math.floor(Math.random() * 101);
+                        let emoji = '⭐';
+                        
+                        if (rating >= 80) emoji = '🌟🌟🌟🌟🌟';
+                        else if (rating >= 60) emoji = '🌟🌟🌟🌟';
+                        else if (rating >= 40) emoji = '🌟🌟🌟';
+                        else if (rating >= 20) emoji = '🌟🌟';
+                        else emoji = '⭐';
+                        
+                        await sock.sendMessage(sender, { 
+                            text: `📊 *RATING*\n\n🎯 Item: ${item}\n⭐ Rating: ${rating}/100\n${emoji}` 
+                        });
+                        continue;
+                    }
+                    
+                    // JODOH
+                    if (command === '.jodoh') {
+                        const name = args[0] || pushName;
+                        const compatibility = Math.floor(Math.random() * 101);
+                        const statuses = [
+                            'Sangat Cocok! 💖',
+                            'Cocok 👍',
+                            'Cukup Cocok 😊',
+                            'Kurang Cocok 😐',
+                            'Tidak Cocok ❌'
+                        ];
+                        
+                        let statusIndex = 0;
+                        if (compatibility >= 80) statusIndex = 0;
+                        else if (compatibility >= 60) statusIndex = 1;
+                        else if (compatibility >= 40) statusIndex = 2;
+                        else if (compatibility >= 20) statusIndex = 3;
+                        else statusIndex = 4;
+                        
+                        await sock.sendMessage(sender, { 
+                            text: `💑 *CEK JODOH*\n\n👤 Nama: ${name}\n💝 Kecocokan: ${compatibility}%\n📊 Status: ${statuses[statusIndex]}` 
+                        });
+                        continue;
+                    }
+                    
+                    // ==================== IMAGE/STICKER ====================
+                    
+                    // STICKER
+                    if (command === '.s' || command === '.sticker') {
+                        let mediaMessage = null;
+                        let mediaType = null;
+                        let isVideo = false;
+                        
+                        if (msg.extendedTextMessage?.contextInfo?.quotedMessage) {
+                            const quoted = msg.extendedTextMessage.contextInfo.quotedMessage;
+                            
+                            if (quoted.imageMessage) {
+                                mediaMessage = quoted.imageMessage;
+                                mediaType = 'image';
+                            } else if (quoted.videoMessage) {
+                                mediaMessage = quoted.videoMessage;
+                                mediaType = 'video';
+                                isVideo = true;
+                            }
+                        } else if (msg.imageMessage) {
+                            mediaMessage = msg.imageMessage;
+                            mediaType = 'image';
+                        } else if (msg.videoMessage) {
+                            mediaMessage = msg.videoMessage;
+                            mediaType = 'video';
+                            isVideo = true;
+                        }
+                        
+                        if (!mediaMessage) {
+                            await sock.sendMessage(sender, { 
+                                text: '⚠️ Reply gambar/video dengan caption .s' 
+                            });
+                            continue;
+                        }
+                        
+                        try {
+                            await sock.sendMessage(sender, { text: '⏳ Membuat sticker...' });
+                            const buffer = await downloadMediaMessage(mediaMessage, mediaType);
+                            const stickerBuffer = await createSticker(buffer, isVideo);
+                            await sock.sendMessage(sender, { sticker: stickerBuffer });
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // TOIMG
+                    if (command === '.toimg') {
+                        try {
+                            if (msg.extendedTextMessage?.contextInfo?.quotedMessage?.stickerMessage) {
+                                const stickerMsg = msg.extendedTextMessage.contextInfo.quotedMessage.stickerMessage;
+                                
+                                await sock.sendMessage(sender, { text: '⏳ Mengkonversi sticker ke gambar...' });
+                                
+                                const buffer = await downloadMediaMessage(stickerMsg, 'sticker');
+                                const imageBuffer = await convertStickerToImage(buffer);
+                                
+                                await sock.sendMessage(sender, {
+                                    image: imageBuffer,
+                                    caption: '🔄 Sticker converted to image'
+                                });
+                            } else {
+                                await sock.sendMessage(sender, { 
+                                    text: '⚠️ Reply sticker dengan caption .toimg' 
+                                });
+                            }
+                        } catch (error) {
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // AUTO STICKER
+                    const hasImage = msg.imageMessage;
+                    const hasVideo = msg.videoMessage;
+                    const isViewOnceMsg = m.key.isViewOnce;
+                    
+                    if ((hasImage || hasVideo) && !text.toLowerCase().includes('nosticker') && !isViewOnceMsg) {
+                        try {
+                            const mediaMessage = hasImage ? msg.imageMessage : msg.videoMessage;
+                            const mediaType = hasImage ? 'image' : 'video';
+                            const isVideo = hasVideo;
+                            
+                            const buffer = await downloadMediaMessage(mediaMessage, mediaType);
+                            const stickerBuffer = await createSticker(buffer, isVideo);
+                            await sock.sendMessage(sender, { sticker: stickerBuffer });
+                        } catch (error) {
+                            console.error('Auto-sticker:', error.message);
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== OWNER COMMANDS ====================
+                    
+                    // OWNER
+                    if (command === '.owner') {
+                        const vcard = 
+                            'BEGIN:VCARD\n' +
+                            'VERSION:3.0\n' +
+                            `FN:${BOT_NAME} Owner\n` +
+                            `TEL;type=CELL;type=VOICE;waid=${OWNER_NUMBER}:+${OWNER_NUMBER}\n` +
+                            'END:VCARD';
+                        
+                        await sock.sendMessage(sender, {
+                            contacts: {
+                                displayName: `${BOT_NAME} Owner`,
+                                contacts: [{ vcard }]
+                            }
+                        });
+                        continue;
+                    }
+                    
+                    // BAN
+                    if (command === '.ban' && isOwner) {
+                        if (msg.extendedTextMessage?.contextInfo?.mentionedJid) {
+                            const target = msg.extendedTextMessage.contextInfo.mentionedJid[0];
+                            bannedUsers.add(target);
+                            await sock.sendMessage(sender, { 
+                                text: `⛔ @${target.split('@')[0]} telah di-BAN!`, 
+                                mentions: [target] 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // UNBAN
+                    if (command === '.unban' && isOwner) {
+                        if (msg.extendedTextMessage?.contextInfo?.mentionedJid) {
+                            const target = msg.extendedTextMessage.contextInfo.mentionedJid[0];
+                            bannedUsers.delete(target);
+                            await sock.sendMessage(sender, { 
+                                text: `✅ @${target.split('@')[0]} telah di-UNBAN!`, 
+                                mentions: [target] 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // SEND VIEWONCE TO GROUP
+                    if (command === '.sendviewonce' && isOwner && isGroup) {
+                        const targetId = args[0];
+                        if (!targetId) {
+                            await sock.sendMessage(sender, { 
+                                text: '❌ Format: .sendviewonce [message_id]\n💡 Gunakan .viewonce list untuk melihat ID' 
+                            });
+                            continue;
+                        }
+                        
+                        const savedMedia = viewOnceMessages.get(targetId);
+                        if (!savedMedia) {
+                            await sock.sendMessage(sender, { 
+                                text: '❌ ID tidak ditemukan!' 
+                            });
+                            continue;
+                        }
+                        
+                        try {
+                            const mediaBuffer = fs.readFileSync(savedMedia.filePath);
+                            const caption = `📸 Media dari View Once\n👤 Pengirim: ${savedMedia.senderName}\n⏰ Waktu: ${new Date(savedMedia.timestamp).toLocaleTimeString('id-ID')}`;
+                            
+                            if (savedMedia.mediaType === 'image') {
+                                await sock.sendMessage(sender, {
+                                    image: mediaBuffer,
+                                    caption: caption
+                                });
+                            } else if (savedMedia.mediaType === 'video') {
+                                await sock.sendMessage(sender, {
+                                    video: mediaBuffer,
+                                    caption: caption
+                                });
+                            }
+                            
+                            await sock.sendMessage(sender, { 
+                                text: `✅ Viewonce berhasil dikirim ke grup!\n👤 From: ${savedMedia.senderName}` 
+                            });
+                        } catch (error) {
+                            console.error('Error sending viewonce:', error);
+                            await sock.sendMessage(sender, { 
+                                text: `❌ Gagal mengirim: ${error.message}` 
+                            });
+                        }
+                        continue;
+                    }
+                    
+                    // ==================== AI CHAT ====================
+                    
+                    if (text && !m.key.fromMe && groq && !hasImage && !hasVideo && !text.startsWith('.') && text.length > 3) {
+                        try {
+                            await sock.sendPresenceUpdate('composing', sender);
+                            
+                            const completion = await groq.chat.completions.create({
+                                messages: [
+                                    { 
+                                        role: 'system', 
+                                        content: `Kamu adalah ${BOT_NAME}, asisten WhatsApp yang ramah dan helpful. Jawablah dalam bahasa Indonesia yang santai dan mudah dimengerti. Gunakan emoji yang sesuai.` 
+                                    },
+                                    { role: 'user', content: text }
+                                ],
+                                model: 'llama-3.3-70b-versatile',
+                                max_tokens: 500,
+                                temperature: 0.7
+                            });
+                            
+                            const response = completion.choices[0].message.content;
+                            if (response) {
+                                await sock.sendMessage(sender, { text: response });
+                            }
+                        } catch (e) {
+                            console.error('AI chat error:', e.message);
+                        }
+                    }
                     
                 } catch (err) {
                     console.error('Handler error:', err.message);
@@ -1416,5 +2929,4 @@ process.on('unhandledRejection', (err) => {
     console.error('💥 Unhandled Rejection:', err.message);
 });
 
-// ==================== START BOT ====================
 startBot();
