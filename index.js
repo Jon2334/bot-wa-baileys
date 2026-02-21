@@ -87,16 +87,34 @@ function getGreeting() {
     return 'Selamat Malam';
 }
 
-// ✅ FUNGSI VALIDASI NOMOR TELEPON (pengganti PHONENUMBER_MCC)
+// ✅ FUNGSI VALIDASI NOMOR TELEPON YANG DIPERBAIKI
 function validatePhoneNumber(number) {
-    // Kode negara yang valid (contoh beberapa negara)
-    const validCountryCodes = ['62', '1', '44', '60', '65', '91', '81', '82', '33', '49', '39', '34', '61', '64', '31', '32', '41', '46', '47', '45', '358', '972', '966', '971', '20', '27', '234', '254', '251', '256', '263'];
+    // Hapus semua karakter non-digit
+    const cleanNumber = number.replace(/\D/g, '');
     
-    // Ambil 2-3 digit pertama
-    const code2 = number.substring(0, 2);
-    const code3 = number.substring(0, 3);
+    // Cek panjang minimal (biasanya 10-15 digit)
+    if (cleanNumber.length < 10 || cleanNumber.length > 15) {
+        return false;
+    }
     
-    return validCountryCodes.includes(code2) || validCountryCodes.includes(code3);
+    // Cek apakah dimulai dengan angka yang valid (tidak boleh 0 di awal setelah kode negara)
+    // Format internasional biasanya dimulai dengan 1-9
+    const firstDigit = cleanNumber.charAt(0);
+    if (firstDigit === '0') {
+        return false; // Tidak boleh dimulai dengan 0
+    }
+    
+    // Jika semua cek lolos, anggap valid
+    return true;
+}
+
+// Atau versi yang lebih sederhana - tanpa validasi ketat
+function validatePhoneNumberSimple(number) {
+    // Hapus semua karakter non-digit
+    const cleanNumber = number.replace(/\D/g, '');
+    
+    // Hanya cek panjang minimal
+    return cleanNumber.length >= 8 && cleanNumber.length <= 15;
 }
 
 function getFormattedDate() {
@@ -945,30 +963,39 @@ async function startBot() {
         const gameSystem = new GameSystem(sock);
         const rpgSystem = new RPGSystem();
 
-        // 🔑 LOGIKA PAIRING CODE - TANPA PHONENUMBER_MCC
+        // 🔑 LOGIKA PAIRING CODE - MENGGUNAKAN VALIDASI SEDERHANA
         if (usePairingCode && !sock.authState.creds.registered) {
             let number = phoneNumber;
             if (!number) {
                 number = await question('\n[?] Masukkan Nomor WhatsApp Bot (Contoh: 628xxx):\n> ');
             }
-            number = number.replace(/[^0-9]/g, '');
-
-            // ✅ Gunakan fungsi validasi sendiri
-            if (!validatePhoneNumber(number)) {
-                console.log("❌ Gunakan kode negara yang benar! (Contoh: 62 untuk Indonesia)");
+            
+            // Bersihkan nomor dari karakter non-digit
+            const cleanNumber = number.replace(/\D/g, '');
+            console.log(`📱 Menggunakan nomor: ${cleanNumber}`);
+            
+            // ✅ Gunakan fungsi validasi sederhana - hanya cek panjang
+            if (!validatePhoneNumberSimple(cleanNumber)) {
+                console.log("❌ Nomor tidak valid! Pastikan panjang antara 8-15 digit.");
+                console.log("   Contoh: 628123456789 (Indonesia) atau 994400007267 (Azerbaijan)");
                 process.exit(0);
             }
 
             setTimeout(async () => {
                 try {
-                    let code = await sock.requestPairingCode(number);
+                    console.log('⏳ Meminta kode pairing...');
+                    let code = await sock.requestPairingCode(cleanNumber);
                     code = code?.match(/.{1,4}/g)?.join("-") || code;
                     console.log(`\n============================`);
                     console.log(`📲 KODE PAIRING ANDA:`);
                     console.log(`\x1b[32m${code}\x1b[0m`);
                     console.log(`============================\n`);
+                    console.log(`⏱️ Kode akan expired dalam 60 detik`);
                 } catch (error) {
                     console.error('❌ Gagal mendapatkan pairing code:', error.message);
+                    if (error.message.includes('400')) {
+                        console.log('⚠️ Kemungkinan nomor tidak valid atau sudah terdaftar');
+                    }
                     console.log('🔄 Mencoba lagi dalam 5 detik...');
                     setTimeout(() => process.exit(1), 5000);
                 }
@@ -1238,7 +1265,6 @@ async function startBot() {
                     
                     // ... (lanjutan kode command handlers - sama seperti sebelumnya)
                     // Untuk menghemat tempat, command handlers tetap sama seperti kode sebelumnya
-                    // Saya akan menyertakan seluruh kode command handlers yang sudah ada
                     
                 } catch (err) {
                     console.error('Handler error:', err.message);
