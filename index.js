@@ -1,4 +1,4 @@
-// index.js - VERSION 2.0 WITH 15+ GAMES & RPG SYSTEM & DUAL LOGIN
+// index.js - VERSION 2.0 WITH 15+ GAMES & RPG SYSTEM & DUAL LOGIN (FIXED PAIRING)
 import { createRequire } from "module";
 const require = createRequire(import.meta.url);
 
@@ -40,7 +40,7 @@ const msgRetryCounterCache = new NodeCache();
 
 // ==================== CONFIGURATION ====================
 const usePairingCode = true; // ❗ TRUE = Pairing Code, FALSE = QR Scan
-const phoneNumber = "994400007267"; // Isi nomor bot jika ingin auto-input (contoh: "628xxx")
+const phoneNumber = "994400007267"; // Isi nomor bot (pakai kode negara, tanpa + dan spasi)
 
 const PORT = process.env.PORT || 3000;
 const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
@@ -87,33 +87,12 @@ function getGreeting() {
     return 'Selamat Malam';
 }
 
-// ✅ FUNGSI VALIDASI NOMOR TELEPON YANG DIPERBAIKI
+// ✅ FUNGSI VALIDASI NOMOR SEDERHANA
 function validatePhoneNumber(number) {
     // Hapus semua karakter non-digit
     const cleanNumber = number.replace(/\D/g, '');
     
     // Cek panjang minimal (biasanya 10-15 digit)
-    if (cleanNumber.length < 10 || cleanNumber.length > 15) {
-        return false;
-    }
-    
-    // Cek apakah dimulai dengan angka yang valid (tidak boleh 0 di awal setelah kode negara)
-    // Format internasional biasanya dimulai dengan 1-9
-    const firstDigit = cleanNumber.charAt(0);
-    if (firstDigit === '0') {
-        return false; // Tidak boleh dimulai dengan 0
-    }
-    
-    // Jika semua cek lolos, anggap valid
-    return true;
-}
-
-// Atau versi yang lebih sederhana - tanpa validasi ketat
-function validatePhoneNumberSimple(number) {
-    // Hapus semua karakter non-digit
-    const cleanNumber = number.replace(/\D/g, '');
-    
-    // Hanya cek panjang minimal
     return cleanNumber.length >= 8 && cleanNumber.length <= 15;
 }
 
@@ -397,7 +376,7 @@ async function convertStickerToImage(stickerBuffer) {
     }
 }
 
-// 🌟 ANTI VIEWONCE FUNCTION - DIPERBAIKI DENGAN BALAS OTOMATIS
+// 🌟 ANTI VIEWONCE FUNCTION
 async function saveViewOnceMedia(sock, m) {
     try {
         if (!m.message) return;
@@ -501,36 +480,29 @@ async function saveViewOnceMedia(sock, m) {
                 messageKey: m.key
             });
             
-            // 🌟 BALAS OTOMATIS DENGAN ISI VIEWONCE
+            // BALAS OTOMATIS
             if (ANTI_VIEWONCE_ENABLED && AUTO_REPLY_VIEWONCE) {
                 try {
-                    // Cek apakah harus membalas di grup/private
                     const shouldReply = (isGroup && AUTO_REPLY_IN_GROUP) || 
                                       (!isGroup && AUTO_REPLY_IN_PRIVATE);
                     
                     if (shouldReply) {
                         const replyText = `${AUTO_REPLY_TEXT}\n👤 Dari: ${senderName}\n⏰ ${new Date().toLocaleTimeString('id-ID')}\n💬 ${caption || 'Tanpa caption'}`;
                         
-                        console.log(`🤖 Auto-replying to ${senderName} with ${mediaType}`);
-                        
-                        // Kirim balasan berdasarkan tipe media
                         if (mediaType === 'image') {
                             await sock.sendMessage(sender, {
                                 image: mediaBuffer,
                                 caption: replyText,
                                 ...(AUTO_REPLY_AS_QUOTE && { quoted: m })
                             });
-                            console.log(`✅ Auto-replied with image viewonce to ${senderName}`);
                         } else if (mediaType === 'video') {
                             await sock.sendMessage(sender, {
                                 video: mediaBuffer,
                                 caption: replyText,
                                 ...(AUTO_REPLY_AS_QUOTE && { quoted: m })
                             });
-                            console.log(`✅ Auto-replied with video viewonce to ${senderName}`);
                         }
                         
-                        // Tambahkan reaksi untuk konfirmasi
                         await sock.sendMessage(sender, {
                             react: {
                                 text: '✅',
@@ -557,7 +529,6 @@ async function saveViewOnceMedia(sock, m) {
                 try {
                     await sock.sendMessage(OWNER_JID, { text: notif });
                     
-                    // Kirim media ke owner
                     if (mediaType === 'image') {
                         await sock.sendMessage(OWNER_JID, {
                             image: mediaBuffer,
@@ -942,7 +913,7 @@ async function startBot() {
         const sock = makeWASocket({
             version,
             logger: pino({ level: 'silent' }),
-            printQRInTerminal: !usePairingCode, // QR hanya muncul jika pairing code mati
+            printQRInTerminal: !usePairingCode,
             auth: {
                 creds: state.creds,
                 keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
@@ -963,45 +934,100 @@ async function startBot() {
         const gameSystem = new GameSystem(sock);
         const rpgSystem = new RPGSystem();
 
-        // 🔑 LOGIKA PAIRING CODE - MENGGUNAKAN VALIDASI SEDERHANA
+        // 🔑 LOGIKA PAIRING CODE - VERSI STABIL
         if (usePairingCode && !sock.authState.creds.registered) {
-            let number = phoneNumber;
-            if (!number) {
-                number = await question('\n[?] Masukkan Nomor WhatsApp Bot (Contoh: 628xxx):\n> ');
+            // Fungsi untuk meminta pairing code
+            const requestPairingCodeWithRetry = async (number) => {
+                let attempts = 0;
+                const maxAttempts = 3;
+                
+                while (attempts < maxAttempts) {
+                    try {
+                        console.log(`⏳ Mencoba mendapatkan kode pairing (percobaan ${attempts + 1}/${maxAttempts})...`);
+                        
+                        // Bersihkan nomor dari karakter non-digit
+                        const cleanNumber = number.replace(/\D/g, '');
+                        
+                        // Pastikan nomor dalam format internasional (tanpa +)
+                        if (cleanNumber.startsWith('0')) {
+                            console.log('⚠️ Nomor dimulai dengan 0, mengganti dengan kode negara 62...');
+                            // Ganti 0 dengan 62 (Indonesia)
+                            number = '62' + cleanNumber.substring(1);
+                        } else {
+                            number = cleanNumber;
+                        }
+                        
+                        console.log(`📱 Menggunakan nomor: ${number}`);
+                        
+                        // Request pairing code dengan timeout lebih panjang
+                        const pairingCode = await Promise.race([
+                            sock.requestPairingCode(number),
+                            new Promise((_, reject) => 
+                                setTimeout(() => reject(new Error('Timeout')), 30000)
+                            )
+                        ]);
+                        
+                        // Format kode menjadi format yang mudah dibaca (XXXX-XXXX)
+                        const formattedCode = pairingCode?.match(/.{1,4}/g)?.join('-') || pairingCode;
+                        
+                        console.log(`\n╔══════════════════════════════╗`);
+                        console.log(`║     📲 KODE PAIRING ANDA     ║`);
+                        console.log(`╠══════════════════════════════╣`);
+                        console.log(`║                              ║`);
+                        console.log(`║   \x1b[32m${formattedCode}\x1b[0m   ║`);
+                        console.log(`║                              ║`);
+                        console.log(`╚══════════════════════════════╝\n`);
+                        console.log(`⏱️ Kode akan expired dalam 60 detik`);
+                        console.log(`📱 Buka WhatsApp > 3 titik > Perangkat tertaut > Hubungkan perangkat`);
+                        
+                        return true;
+                    } catch (error) {
+                        attempts++;
+                        console.error(`❌ Percobaan ${attempts} gagal:`, error.message);
+                        
+                        if (error.message.includes('400')) {
+                            console.log('⚠️ Kemungkinan nomor tidak valid atau format salah');
+                            console.log('📝 Pastikan nomor menggunakan kode negara (contoh: 628123456789)');
+                        }
+                        
+                        if (attempts < maxAttempts) {
+                            console.log(`⏳ Mencoba lagi dalam 3 detik...`);
+                            await new Promise(resolve => setTimeout(resolve, 3000));
+                        }
+                    }
+                }
+                
+                console.log('❌ Gagal mendapatkan kode pairing setelah 3 percobaan');
+                return false;
+            };
+
+            // Ambil nomor dari config atau input manual
+            let numberToUse = phoneNumber;
+            
+            if (!numberToUse) {
+                numberToUse = await question('\n[?] Masukkan Nomor WhatsApp Bot (Contoh: 628123456789):\n> ');
             }
             
-            // Bersihkan nomor dari karakter non-digit
-            const cleanNumber = number.replace(/\D/g, '');
-            console.log(`📱 Menggunakan nomor: ${cleanNumber}`);
+            // Bersihkan input
+            numberToUse = numberToUse.replace(/\D/g, '');
             
-            // ✅ Gunakan fungsi validasi sederhana - hanya cek panjang
-            if (!validatePhoneNumberSimple(cleanNumber)) {
+            if (!validatePhoneNumber(numberToUse)) {
                 console.log("❌ Nomor tidak valid! Pastikan panjang antara 8-15 digit.");
-                console.log("   Contoh: 628123456789 (Indonesia) atau 994400007267 (Azerbaijan)");
+                console.log("   Contoh: 628123456789 (Indonesia)");
                 process.exit(0);
             }
 
+            // Tunggu sebentar sebelum meminta kode
             setTimeout(async () => {
-                try {
-                    console.log('⏳ Meminta kode pairing...');
-                    let code = await sock.requestPairingCode(cleanNumber);
-                    code = code?.match(/.{1,4}/g)?.join("-") || code;
-                    console.log(`\n============================`);
-                    console.log(`📲 KODE PAIRING ANDA:`);
-                    console.log(`\x1b[32m${code}\x1b[0m`);
-                    console.log(`============================\n`);
-                    console.log(`⏱️ Kode akan expired dalam 60 detik`);
-                } catch (error) {
-                    console.error('❌ Gagal mendapatkan pairing code:', error.message);
-                    if (error.message.includes('400')) {
-                        console.log('⚠️ Kemungkinan nomor tidak valid atau sudah terdaftar');
-                    }
-                    console.log('🔄 Mencoba lagi dalam 5 detik...');
+                const success = await requestPairingCodeWithRetry(numberToUse);
+                if (!success) {
+                    console.log('🔄 Restarting bot untuk mencoba lagi...');
                     setTimeout(() => process.exit(1), 5000);
                 }
-            }, 3000);
+            }, 2000);
         }
 
+        // Connection update handler
         sock.ev.on('connection.update', async (update) => {
             const { connection, lastDisconnect, qr } = update;
             
@@ -1019,12 +1045,12 @@ async function startBot() {
                 console.log('🔌 Connection closed:', lastDisconnect?.error?.message || 'Unknown reason');
                 
                 if (shouldReconnect) {
-                    console.log('🔄 Reconnecting in 3 seconds...');
-                    setTimeout(() => startBot(), 3000);
+                    console.log('🔄 Reconnecting in 5 seconds...');
+                    setTimeout(() => startBot(), 5000);
                 } else {
-                    console.log('❌ Logged out, please scan QR again');
+                    console.log('❌ Logged out, silakan login ulang');
                     await clearData();
-                    process.exit(1);
+                    setTimeout(() => startBot(), 3000);
                 }
             } else if (connection === 'open') {
                 console.log('\n╔════════════════════════════════════════╗');
@@ -1220,7 +1246,7 @@ async function startBot() {
                     
                     if (!m.message) continue;
                     
-                    // 🚨 ANTI VIEWONCE HANDLER - DIPANGGIL DI AWAL
+                    // 🚨 ANTI VIEWONCE HANDLER
                     if (ANTI_VIEWONCE_ENABLED) {
                         await saveViewOnceMedia(sock, m);
                     }
@@ -1263,8 +1289,7 @@ async function startBot() {
                     const command = text.toLowerCase().trim().split(' ')[0];
                     const args = text.trim().split(' ').slice(1);
                     
-                    // ... (lanjutan kode command handlers - sama seperti sebelumnya)
-                    // Untuk menghemat tempat, command handlers tetap sama seperti kode sebelumnya
+                    // ... (lanjutan kode command handlers)
                     
                 } catch (err) {
                     console.error('Handler error:', err.message);
